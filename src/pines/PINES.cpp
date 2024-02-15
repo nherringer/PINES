@@ -183,11 +183,9 @@ PINES::PINES(const ActionOptions&ao):
   nl_skin(std:: vector<double>(Nlist)),
   fmass(std:: vector<double>(Nlist)),
   dosort(std:: vector<bool>(Nlist)),
-  compos(std:: vector<Vector>(NLsize)),
   sw(std:: vector<string>(Nlist)),
   nl(std:: vector<NeighborList *>(Nlist)),
   nl_small(std:: vector<NeighborList *>(Nlist)),
-  nlcom(std:: vector<NeighborList *>(NLsize)),
   m_deriv(std:: vector<Vector>(1)),
   ds_array(std:: vector<double>(1)),
   ann_deriv(std:: vector<std:: vector<Vector> >(1)),
@@ -214,7 +212,6 @@ PINES::PINES(const ActionOptions&ao):
   writestride(false),
   writePINESstride(-1),
   cart2PINES(true),
-  com(false),
   // SD -- used in prepare function.
   invalidateList(true),
   firsttime(true),
@@ -309,19 +306,19 @@ PINES::PINES(const ActionOptions&ao):
     }
   }
 
-  // Atoms for PINES
+  // Define pines atoms and treat special case of water
   parse("PINESATOMS",Natm);
   atype.resize(Natm);
   parseVector("ATOMTYPES",atype);
   solv_blocks=0;
   if (std::find(atype.begin(), atype.end(), "OW") != atype.end()) {
-    solv_blocks=1;
+    solv_blocks=1; //Only water oxygens considered
   }
   if ( (std::find(atype.begin(), atype.end(), "HW1") != atype.end()) && (std::find(atype.begin(), atype.end(), "HW2") != atype.end()) ) {
-    solv_blocks=2;
+    solv_blocks=2; //Only water hydrogens considered
   }
   if ( (std::find(atype.begin(), atype.end(), "OW") != atype.end()) && (std::find(atype.begin(), atype.end(), "HW1") != atype.end()) && (std::find(atype.begin(), atype.end(), "HW2") != atype.end()) ) {
-    solv_blocks=3;
+    solv_blocks=3; //Closest n water oxygen and hydrogens (not necessarily from the same molecule) considered
   }
   // If included, HW1 and HW2 atomtypes are combined into a single HW
   // atomtype so Natm must be decreased by 1 to account for this
@@ -345,7 +342,7 @@ PINES::PINES(const ActionOptions&ao):
     }
   }
 
-  // Reference PDB file
+  // Reference PDB file from which atom names, types, ids, and initial positions are determined
   parse("REF_FILE",ref_file);
   PDB mypdb;
   FILE* fp=fopen(ref_file.c_str(),"r");
@@ -1394,15 +1391,12 @@ void PINES::calculate()
       bool doupdate=false;
       // For the first step build previous positions = actual positions
       if (prev_stp==-1) {
-        bool docom=com;
         for (unsigned j=0; j<Nlist; j++) {
           for (unsigned i=0; i<nl[j]->getFullAtomList().size(); i++) {
             Vector Pos;
-            if(docom) {
-              Pos=compos[i];
-            } else {
-              Pos=getPosition(nl[j]->getFullAtomList()[i].index());
-            }
+
+            Pos=getPosition(nl[j]->getFullAtomList()[i].index());
+
             prev_pos[j].push_back(Pos);
           }
         }
@@ -1411,15 +1405,12 @@ void PINES::calculate()
       // Decide whether to update lists based on atom displacement, every stride
       std:: vector<std:: vector<Vector> > tmp_pos(Nlist);
       if (getStep() % nlall->getStride() ==0) {
-        bool docom=com;
         for (unsigned j=0; j<Nlist; j++) {
           for (unsigned i=0; i<nl[j]->getFullAtomList().size(); i++) {
             Vector Pos;
-            if(docom) {
-              Pos=compos[i];
-            } else {
-              Pos=getPosition(nl[j]->getFullAtomList()[i].index());
-            }
+
+            Pos=getPosition(nl[j]->getFullAtomList()[i].index());
+
             tmp_pos[j].push_back(Pos);
             if (pbcDistance(tmp_pos[j][i],prev_pos[j][i]).modulo()>=nl_skin[j]) {
               doupdate=true;
@@ -1452,7 +1443,6 @@ void PINES::calculate()
     for(unsigned j=0; j<Nlist; j++) {
       if(dosort[j]) {
         // from global to local variables to speedup the for loop with if statements
-        bool docom=com;
         bool dopbc=pbc;
         // Vectors collecting occupancies: OrdVec one rank, OrdVecAll all ranks
         std:: vector<int> OrdVec(Nprec,0);
@@ -1466,13 +1456,10 @@ void PINES::calculate()
             unsigned i0=(nl[j]->getClosePairAtomNumber(i).first).index();
             unsigned i1=(nl[j]->getClosePairAtomNumber(i).second).index();\
             Vector Pos0,Pos1;
-            if(docom) {
-              Pos0=compos[i0];
-              Pos1=compos[i1];
-            } else {
-              Pos0=getPosition(i0);
-              Pos1=getPosition(i1);
-            }
+
+            Pos0=getPosition(i0);
+            Pos1=getPosition(i1);
+
             if(dopbc) {
               ddist=pbcDistance(Pos0,Pos1);
             } else {
@@ -1527,13 +1514,10 @@ void PINES::calculate()
             unsigned i0=(nl_small[j]->getClosePairAtomNumber(i).first).index();
             unsigned i1=(nl_small[j]->getClosePairAtomNumber(i).second).index();
             Vector Pos0,Pos1;
-            if(docom) {
-              Pos0=compos[i0];
-              Pos1=compos[i1];
-            } else {
-              Pos0=getPosition(i0);
-              Pos1=getPosition(i1);
-            }
+
+            Pos0=getPosition(i0);
+            Pos1=getPosition(i1);
+
             if(dopbc) {
               ddist=pbcDistance(Pos0,Pos1);
             } else {
