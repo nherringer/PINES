@@ -1,0 +1,80 @@
+# Hypothetical example system:
+# 3 C6H14 (hexane) molecules in salt water (many ions)
+# PDB order is: hex1, hex2, hex3, water (OW and HW), Na, Cl
+# Block parameters take arguments [ATOMID, RESID, NAME, TYPE]
+
+PINES ...
+LABEL=pines
+PRECISION=10000
+REF_FILE=example_sys.pdb
+# C-C block including all molecules
+BLOCK1={
+    G1=TYPE C
+    G2=TYPE C
+    SIZE=153
+    LIMIT_PER_G1=(Optional, Default=NONE)
+    EXCLUDE_PAIRS=(Optional, Default=NONE)
+}
+# Terminal C (C1,C6) and water oxygen (OW) block
+# Closest 12 Cterm-OW values (could all be neighbors of a single Cterm)
+BLOCK2={
+    G1=NAME C1,C6
+    G2=OW
+    SIZE=12
+    LIMIT_PER_G1=(Optional, Default=NONE)
+    EXCLUDE_PAIRS=(Optional, Default=NONE)
+}
+# Terminal C (C1,C6) and water oxygen (OW) block
+# Closest 2 OW per Cterm
+BLOCK3={
+    G1=NAME C1,C6
+    G2=OW
+    SIZE=12
+    LIMIT_PER_G1=2 (Optional, Default=NONE)
+    EXCLUDE_PAIRS=(Optional, Default=NONE)
+}
+# C-C block pertaining to only hex1
+BLOCK4={
+    G1=RESID 1; TYPE C
+    G2=RESID 1; TYPE C
+    SIZE=15
+    LIMIT_PER_G1=(Optional, Default=NONE)
+    EXCLUDE_PAIRS=(Optional, Default=NONE)
+}
+# C-CL block pertaining to only hex2
+# Closest 3 C-CL
+BLOCK5={
+    G1=RESID 2; TYPE C
+    G2=TYPE CL
+    SIZE=3
+    LIMIT_PER_G1=(Optional, Default=NONE)
+    EXCLUDE_PAIRS=(Optional, Default=NONE)
+}
+# CL-HW block for a specific CL
+# Closest 8
+BLOCK6={
+    G1=ATOMID 115 #(Specific CL ID)
+    G2=TYPE HW
+    SIZE=8
+    LIMIT_PER_G1=(Optional, Default=NONE)
+    EXCLUDE_PAIRS=(Optional, Default=NONE)
+}
+# Cterm-Cterm block including all molecules but excluding Cterm pairs on the same molecule 
+# (All intermolecular, no intramolecular)
+BLOCK7={
+    G1=NAME C1,C6
+    G2=NAME C1,C6
+    SIZE=12 #Full NC2 is 15 and - 3 pairs = 12
+    LIMIT_PER_G1=(Optional, Default=NONE)
+    EXCLUDE_PAIRS=ATOMID 1,6;7,12;13,18 (Optional, Default=NONE)
+}
+SFACTOR=1.0
+SWITCH1={RATIONAL R_0=0.56 MM=10 NN=5}
+.
+.
+.
+SWITCH7={RATIONAL R_0=0.34 MM=12 NN=6}
+NL_CUTOFF=4.0
+NL_STRIDE=1.0
+NL_SKIN=0.1
+... PINES
