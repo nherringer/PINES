@@ -369,7 +369,22 @@ for (unsigned n=0; n<N_Blocks; n++) {
 }
 
 nlall= new NeighborList(listall,true,pbc,getPbc(),comm,9999999,0);
-for(n=0; n<N_Blocks; n++){
+// build heap neighbor lists
+// heap_n-restricted block_groups_atom_list[n][i]
+
+// N closest interactions, so take N
+
+for(int n=0; n<N_Blocks; n++){
+  for(int g1=0; g1<block_groups_atom_list[n][0].size(); g1++){
+      int ind0 = block_groups_atom_list[n][0][g1]
+      Pos0=getPosition(ind0);
+    for(int g2=0; g2<block_groups_atom_list[n][1].size(); g2++){
+      int ind1 = block_groups_atom_list[n][1][g2]
+      Pos1=getPosition(ind1);
+      dist=pbcDistance(Pos0,Pos1);
+      heap_nl[n].push({ind0, ind1, dist})
+    }
+  }
   nl[n]= new NeighborList(block_groups_atom_list[n][0],block_groups_atom_list[n][1],true,false,pbc,getPbc(),comm,nl_cut[n],nl_st[n]);
 }
 // nlall is the full atomlist of all possible relevant atoms
@@ -395,6 +410,21 @@ void PINES::prepare() {
       ds_array.resize(total_count);
     } else if((getStep()%nlall->getStride()==0) && (getStep()!=0)) {
       
+      //initiate lists
+      for(int n=0; n<N_Blocks; n++){
+        for(int m=0; m<heap_nl[n][0].size(); m++){
+          for(int l=0; l<heap_nl[n][1].size(); l++){
+              Pos0=getPosition(id0);
+              Pos1=getPosition(id1);
+
+              ddist=pbcDistance(Pos0,Pos1);
+          }
+        }  
+      }
+
+
+
+
       std::vector<vector<AtomNumber>> snn_list;
       std::vector<vector<AtomNumber>> Hydrogen_nn_list;
       std::vector<double> snn_mags;

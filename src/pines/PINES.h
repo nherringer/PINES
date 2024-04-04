@@ -37,7 +37,7 @@ private:
   Stopwatch& stopwatch=*stopwatch_fwd;
   // Added NL_const_size to fix solute-solvent elements as constant size
   unsigned NL_const_size;
-  int updatePINES;
+  int updatePINES, N_Blocks;
   size_t Nprec;
   unsigned Natm,Nlist,NLsize;
   double Fvol,Vol0;
@@ -90,6 +90,17 @@ private:
   bool invalidateList,firsttime,enableLog;
   
   Tensor m_virial; // [NOT SUPPORTED/USED -- SD]
+
+  std::vector<string> block_params;
+  std::vector<std::vector<std::vector<AtomNumber>>> block_groups_atom_list;
+  std::vector<int> block_lengths;
+  std::vector<int> G1_limits;
+  std::vector<std::vector<AtomNumber>> Exclude_Pairs;
+  std::vector<std::vector<std::vector<AtomNumber>>> ID_list;
+  std::vector<std::vector<std::vector<int>>> ResID_list;
+  std::vector<std::vector<std::vector<string>>> Name_list;
+  std::vector<std::vector<std::vector<bool>>> filters;
+
 
   // dr_dxyz_array is the 3D array (dr/dxyz) used to build ann_deriv and ANN_sum_array --NH [NOT USED -- SD]
   // std::vector<std:: vector<Vector> > dr_dxyz_array;

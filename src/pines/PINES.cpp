@@ -31,6 +31,7 @@ along with plumed.  If not, see <http://www.gnu.org/licenses/>.
 #include <cmath>
 #include <iostream>
 #include <stdio.h>
+#include <queue>
 
 using namespace std;
 
@@ -38,90 +39,6 @@ namespace PLMD
 {
 namespace PINES
 {
-
-//+PLUMEDOC PINESMOD_COLVAR PINES
-/*
-
-******************WARNING: ONLYDIRECT FUNCTIONALITY HAS ONLY BEEN TESTED FOR AR13**********************************
-
-\par Examples
-
-\plumedfile
-PINES ...
-LABEL=PINES
-PRECISION=1000
-NLIST
-ONLYCROSS
-REF_FILE=md.pdb
-PINESATOMS=5
-ATOMTYPES=NA,CL,OW,HW1,HW2
-SFACTOR=1.0,1.0,1.0,1.0,1.0
-SORT=1.0,1.0,1.0,1.0,1.0
-SWITCH1={RATIONAL R_0=0.38 MM=12 NN=6}
-SWITCH2={RATIONAL R_0=0.35 MM=12 NN=6}
-SWITCH3={RATIONAL R_0=0.41 MM=12 NN=6}
-SWITCH4={RATIONAL R_0=0.40 MM=12 NN=6}
-SWITCH5={RATIONAL R_0=0.28 MM=12 NN=6}
-NL_CUTOFF=5.0,1.5,1.5,1.5,1.5
-NL_STRIDE=10.0,10.0,10.0,10.0,10.0
-NL_SKIN=0.1,0.1,0.1,0.1,0.1
-PINESREP
-NL_CONSTANT_SIZE=10
-... PINES
-PRINT STRIDE=1 ARG=PINES FILE=PINES_trj
-\plumedfile
-
-This module is designed for compatability with the ANN module. The following is an example of a plumed.dat file using both modules:
-\plumedfile
-PINES ...
-LABEL=PINES
-PRECISION=1000
-NLIST
-ONLYCROSS
-REF_FILE=md.pdb
-PINESATOMS=5
-ATOMTYPES=NA,CL,OW,HW1,HW2
-SFACTOR=1.0,1.0,1.0,1.0,1.0
-SORT=1.0,1.0,1.0,1.0,1.0
-SWITCH1={RATIONAL R_0=0.38 MM=12 NN=6}
-SWITCH2={RATIONAL R_0=0.35 MM=12 NN=6}
-SWITCH3={RATIONAL R_0=0.41 MM=12 NN=6}
-SWITCH4={RATIONAL R_0=0.40 MM=12 NN=6}
-SWITCH5={RATIONAL R_0=0.28 MM=12 NN=6}
-NL_CUTOFF=5.0,1.5,1.5,1.5,1.5
-NL_STRIDE=10.0,10.0,10.0,10.0,10.0
-NL_SKIN=0.1,0.1,0.1,0.1,0.1
-PINESREP
-NL_CONSTANT_SIZE=10
-... PINES
-
-ANN ...
-LABEL=ann
-ARG=PINES.*
-NUM_LAYERS=6
-NUM_NODES=61,64,32,16,3,3
-ACTIVATIONS=BNTanh,BNTanh,BNTanh,BNTanh,Linear
-WEIGHTS0=                                                                                                        1,1           Top
-WEIGHTS1=
-WEIGHTS2=
-BIASES0=
-BIASES1=
-BIASES2=
-... ANN
-
-PBMETAD ...
-ARG=ann.node-0,ann.node-1,ann.node-2 SIGMA=0.1,0.1,0.1 HEIGHT=1.2
-TEMP=300 PACE=500 BIASFACTOR=2 LABEL=pb
-FILE=hills_pc0.out,hills_pc1.out,hills_pc2.out
-GRID_MIN=-2.5,-2.5,-2.5 GRID_MAX=2.5,2.5,2.5 GRID_BIN=5000,5000,5000
-... PBMETAD
-PRINT STRIDE=1 ARG=ann.node-0,ann.node-1,ann.node-2,pb.bias FILE=colvar.out
-\plumedfile
-
-
-*/
-//+ENDPLUMEDOC
-
 
 PLUMED_REGISTER_ACTION(PINES,"PINES")
 
@@ -132,11 +49,16 @@ void PINES::registerKeywords( Keywords& keys )
            "You should specify a Switching function for all PINES blocks."
            "Details of the various switching "
            "functions you can use are provided on \\ref switchingfunction.");
+  keys.add("numbered","BLOCK","Each block of the PIV");
   keys.add("compulsory","PRECISION","the precision for approximating reals with integers in sorting.");
   keys.add("compulsory","REF_FILE","PDB file name that contains the information about system connectivity and labels.");
-  keys.add("compulsory","PINESATOMS","Number of atoms to use for PINES.");
-  keys.add("compulsory","SORT","Whether to sort or not the PINES block.");
-  keys.add("compulsory","ATOMTYPES","The atom types to use for PINES.");
+  keys.add("compulsory","N_BLOCKS","Number of blocks in PIV");
+  keys.add("compulsory","SIZE","Length of each PIV Block");
+  keys.add("optional","ATOMID","AtomIDs");
+  keys.add("optional","RESID","ResIDs");
+  keys.add("optional","NAME","Atom Names");
+  keys.add("optional","EXLCUDE_PAIRS","Excluded pairs");
+  keys.add("optional","LIMIT_PER_G1","NN for each group 1 atom");
   keys.add("optional","SFACTOR","Scale the PINES-distance by such block-specific factor");
   keys.add("optional","VOLUME","Scale atom-atom distances by the cubic root of the cell volume. The input volume is used to scale the R_0 value of the switching function. ");
   keys.add("optional","UPDATEPINES","Frequency (in steps) at which the PINES is updated.");
@@ -215,7 +137,17 @@ PINES::PINES(const ActionOptions&ao):
   // SD -- used in prepare function.
   invalidateList(true),
   firsttime(true),
-  enableLog(false)
+  enableLog(false),
+  block_params(std:: vector<string>(1)),
+  block_groups_atom_list(std:: vector<std:: vector<std:: vector<AtomNumber> > >(1)),
+  block_lengths(std:: vector<int>(1)),
+  G1_limits(std:: vector<int>(1)),
+  Exclude_Pairs(std:: vector<std:: vector<AtomNumber> >(1)),
+  ID_list(std:: vector<std:: vector<std:: vector<AtomNumber> > >(1)),
+  ResID_list(std:: vector<std:: vector<std:: vector<int> > >(1)),
+  Name_list(std:: vector<std:: vector<std:: vector<string> > >(1)),
+  filters(std:: vector<std:: vector<std:: vector<bool> > >(1)),
+  N_Blocks(1)
 {
   if(keywords.exists("ENABLE_LOG")) {
     parseFlag("ENABLE_LOG",enableLog);
@@ -286,274 +218,8 @@ PINES::PINES(const ActionOptions&ao):
     Svol=true;
   }
 
-  // PINES direct and cross blocks
-  bool oc=false,od=false;
-  parseFlag("ONLYCROSS",oc);
-  parseFlag("ONLYDIRECT",od);
-  if (oc&&od) {
-    error("ONLYCROSS and ONLYDIRECT are incompatible options!");
-  }
-  if(oc) {
-    direct=false;
-    if (enableLog) {
-      log << "Using only CROSS-PINES blocks\n";
-    }
-  }
-  if(od) {
-    cross=false;
-    if (enableLog) {
-      log << "Using only DIRECT-PINES blocks\n";
-    }
-  }
-
-  // Define pines atoms and treat special case of water
-  parse("PINESATOMS",Natm);
-  atype.resize(Natm);
-  parseVector("ATOMTYPES",atype);
-  solv_blocks=0;
-  if (std::find(atype.begin(), atype.end(), "OW") != atype.end()) {
-    solv_blocks=1; //Only water oxygens considered
-  }
-  if ( (std::find(atype.begin(), atype.end(), "HW1") != atype.end()) && (std::find(atype.begin(), atype.end(), "HW2") != atype.end()) ) {
-    solv_blocks=2; //Only water hydrogens considered
-  }
-  if ( (std::find(atype.begin(), atype.end(), "OW") != atype.end()) && (std::find(atype.begin(), atype.end(), "HW1") != atype.end()) && (std::find(atype.begin(), atype.end(), "HW2") != atype.end()) ) {
-    solv_blocks=3; //Closest n water oxygen and hydrogens (not necessarily from the same molecule) considered
-  }
-  // If included, HW1 and HW2 atomtypes are combined into a single HW
-  // atomtype so Natm must be decreased by 1 to account for this
-  if (solv_blocks > 1) {
-    Natm = Natm - 1; 
-  }
-  // Specific ordering of solvent atomtypes in input file is necessary
-  // to avoid complicating the code. This checks to make sure that the
-  // expected order is being followed in the input file.
-  if (solv_blocks == 1) {
-    if (atype[atype.size()-1] != "OW") {
-      error("Water atoms must be listed last for ATOMTYPES and must be listed in order as (OW), (HW1,HW2), or (OW,HW1,HW2)");
-    }
-  } else if (solv_blocks == 2) {
-    if ((atype[atype.size()-2] != "HW1") || (atype[atype.size()-1] != "HW2")) {
-      error("Water atoms must be listed last for ATOMTYPES and must be listed in order as (OW), (HW1,HW2), or (OW,HW1,HW2)");
-    }
-  } else if (solv_blocks == 3) {
-    if ((atype[atype.size()-3] != "OW") || (atype[atype.size()-2] != "HW1") || (atype[atype.size()-1] != "HW2")) {
-      error("Water atoms must be listed last for ATOMTYPES and must be listed in order as (OW), (HW1,HW2), or (OW,HW1,HW2)");
-    }
-  }
-
-  // Reference PDB file from which atom names, types, ids, and initial positions are determined
-  parse("REF_FILE",ref_file);
-  PDB mypdb;
-  FILE* fp=fopen(ref_file.c_str(),"r");
-  if (fp!=NULL) {
-    if (enableLog) {
-      log<<"Opening PDB file with reference frame: "<<ref_file.c_str()<<"\n";
-    }
-    mypdb.readFromFilepointer(fp,plumed.getAtoms().usingNaturalUnits(),0.1/atoms.getUnits().getLength());
-    fclose (fp);
-  } else {
-    error("Error in reference PDB file");
-  }
-
-  // Build COM/Atom lists of AtomNumbers (this might be done in PBC.cpp)
-  // Atomlist or Plist used to build pair lists
-  Plist.resize(Natm);
-  // Atomlist used to build list of atoms for each COM
-  std:: vector<std:: vector<AtomNumber> > comatm(1);
-  // NLsize is the number of atoms in the pdb cell
-  NLsize=mypdb.getAtomNumbers().size();
-  // In the following P stands for Point (either an Atom or a COM)
-  unsigned resnum=0;
-  // Presind (array size: number of residues) contains the contains the residue number
-  //   this is because the residue numbers may not always be ordered from 1 to resnum
-  std:: vector<unsigned> Presind;
-  // Build Presind
-  for (unsigned i=0; i<mypdb.getAtomNumbers().size(); i++) {
-    int rind=mypdb.getResidueNumber(mypdb.getAtomNumbers()[i]);
-    bool oldres=false;
-    for (unsigned j=0; j<Presind.size(); j++) {
-      if(rind==Presind[j]) {
-        oldres=true;
-      }
-    }
-    if(!oldres) {
-      Presind.push_back(rind);
-    }
-  }
-  resnum=Presind.size();
-
-  // Pind0 is the atom/COM used in Nlists (for COM Pind0 is the first atom in the pdb belonging to that COM)
-  unsigned Pind0size;
-
-  Pind0size=NLsize;
   
-  std:: vector<unsigned> Pind0(Pind0size);
 
-  comatm.resize(NLsize);
-
-  if (enableLog) {
-    log << "Total COM/Atoms: " << Natm*resnum << " \n";
-  }
-  // Build lists of Atoms/COMs for NLists
-  //   comatm filled also for non_COM calculation for analysis purposes
-  unsigned countIndex = 0;
-  for (unsigned j=0; j<Natm; j++) {
-    unsigned oind;
-    for (unsigned i=0; i<Pind0.size(); i++) {
-      Pind0[i]=0;
-    }
-    for (unsigned i=0; i<mypdb.getAtomNumbers().size(); i++) {
-      // Residue/Atom AtomNumber: used to build NL for COMS/Atoms pairs.
-      AtomNumber anum=mypdb.getAtomNumbers()[i];
-      // ResidueName/Atomname associated to atom
-      string rname=mypdb.getResidueName(anum);
-      string aname=mypdb.getAtomName(anum);
-      // Index associated to residue/atom: used to separate COM-lists
-      int rind=mypdb.getResidueNumber(anum);
-      unsigned aind=anum.index();
-      // This builds lists for NL
-      string Pname;
-      unsigned Pind;
-
-      Pname=aname;
-      Pind=aind;
-      
-      if(Pname==atype[j]) {
-        if(Pind0[Pind]==0) {
-          // adding the atomnumber to the atom/COM list for pairs
-          // SD local variable of type AtomNumber. Its value is set using countIndex.
-          AtomNumber ati;
-          ati.setIndex(countIndex);
-          Plist[j].push_back(ati); //anum) -- SD (previously, it is same as atom number in PDB file).;
-          Pind0[Pind]=aind+1;
-          oind=Pind;
-          countIndex += 1;
-        }
-        // adding the atomnumber to list of atoms for every COM/Atoms
-        comatm[Pind0[Pind]-1].push_back(anum);
-      }
-      // This block accounts for the combination of HW1 and HW2 so that
-      // HW2 atom IDs are still included
-      else if( (solv_blocks > 1) && (j == Natm-1) ) {
-        if(Pname==atype[atype.size()-1]) {
-          if(Pind0[Pind]==0) {
-            // adding the atomnumber to the atom/COM list for pairs
-            // SD local variable of type AtomNumber. Its value is set using countIndex.
-            AtomNumber ati;
-            ati.setIndex(countIndex);
-            Plist[j].push_back(ati); //anum) -- SD (previously, it is same as atom number in PDB file).;
-            Pind0[Pind]=aind+1;
-            oind=Pind;
-            countIndex += 1;
-          }
-          // adding the atomnumber to list of atoms for every COM/Atoms
-          comatm[Pind0[Pind]-1].push_back(anum);
-        }
-      }
-    }
-    // Output Lists
-    if (enableLog) {
-      log << "  Groups of type  " << j << ": " << Plist[j].size() << " \n";
-    }
-    string gname;
-    unsigned gsize;
-
-    gname=mypdb.getAtomName(comatm[Pind0[oind]-1][0]);
-    gsize=1;
-
-    if (enableLog) {
-    log.printf("    %6s %3s %13s %10i %6s\n", "type  ", gname.c_str(),"   containing ",gsize," atoms");
-    }
-  }
-
-  // SD This is to build the list with the atoms required for PINES.
-  // std:: vector<AtomNumber> listall;
-  listall.clear();
-  // AtomToResID is used to ensure that all relevant atoms from a water
-  // molecule are considered by matching their residue ID. AtomToResID
-  // uses the same indexing as listall for easy comparison between atom
-  // IDs and their corresponding residue ID.
-  AtomToResID_Dict.clear();
-  if (solv_blocks > 1) {
-    for (unsigned j=0; j<Natm+1; j++) {
-      for (unsigned i=0; i<mypdb.getAtomNumbers().size(); i++) {
-        // SD --- including only user defined atom types;
-        AtomNumber at_num = mypdb.getAtomNumbers()[i];
-        int rind=mypdb.getResidueNumber(mypdb.getAtomNumbers()[i]);                                                                        
-        // ResidueName/Atomname associated to atom                                                                        
-        string at_name = mypdb.getAtomName(at_num);                                                                             
-        if(at_name == atype[j]) {
-          // -- SD listall should contain the actual atom numbers in the PDB file.
-          listall.push_back(at_num);
-          AtomToResID_Dict.push_back(rind);
-        }                                                                                                             
-      }                                                                                                                 
-    }
-  } else {
-    for (unsigned j=0; j<Natm; j++) {
-      for (unsigned i=0; i<mypdb.getAtomNumbers().size(); i++) {
-        // SD --- including only user defined atom types;
-        AtomNumber at_num = mypdb.getAtomNumbers()[i];                                                                        
-        // ResidueName/Atomname associated to atom                                                                        
-        string at_name = mypdb.getAtomName(at_num);                                                                             
-        if(at_name == atype[j]) {
-          // -- SD listall should contain the actual atom numbers in the PDB file.
-          listall.push_back(at_num);
-        } 
-      }                                                                                                                 
-    }
-  }
-
-  // PINES blocks and Neighbour Lists
-  Nlist=0;
-  // Direct adds the A-A ad B-B blocks (N)
-  if(direct) {
-    Nlist=Nlist+unsigned(Natm);
-  }
-  // Cross adds the A-B blocks (N*(N-1)/2)
-  if(cross) {
-    Nlist=Nlist+unsigned(double(Natm*(Natm-1))/2.);
-    // If water oxygens and water hydrogens are included
-    // there will be an undesirable interaction block corresponding to
-    // OW-HW. This removes that block from the total block count (Nlist)
-    if (solv_blocks == 3) {
-      Nlist = Nlist - 1;
-    }
-  }
-
-  unsigned ncnt=0;
-  // NL_const_size limits the size of water oxygen blocks (also can be
-  // thought of as the number of water molecules), but there should be
-  // twice as many hydrogen considered as oxygen (2:1 hydrogen/oxygen
-  // ratio in water). This helps with this later by specifying which
-  // block numbers out of Nlist correspond to which block types 
-  NList_OW_blocks.clear();
-  NList_HW_blocks.clear();
-  if(cross){
-    for (unsigned j=0; j<Natm; j++) {
-      for (unsigned i=j+1; i<Natm; i++) {
-        if (ncnt < Nlist) {
-          if (solv_blocks == 1) {
-            if (i == Natm-1) {
-              NList_OW_blocks.push_back(ncnt);
-            }
-          } else if (solv_blocks == 2) {
-            if (i == Natm-1) {
-              NList_HW_blocks.push_back(ncnt);
-            }
-          } else if (solv_blocks == 3) {
-            if (i == Natm-1) {
-              NList_HW_blocks.push_back(ncnt);
-            } else if (i == Natm-2) {
-              NList_OW_blocks.push_back(ncnt);
-            }
-          }
-        }
-        ncnt+=1;
-      }
-    }
-  }
   // PINES scaled option
   scaling.resize(Nlist);
   for(unsigned j=0; j<Nlist; j++) {
@@ -575,205 +241,569 @@ PINES::PINES(const ActionOptions&ao):
     writestride=true;
   }
 
-  // Neighbour Lists option
-  parseFlag("NLIST",doneigh);
-  nl.resize(Nlist);
-  nl_small.resize(Nlist);
-  nl_skin.resize(Nlist);
-  nl_cut.resize(Nlist,0.);
-  nl_st.resize(Nlist,0);
-  if(doneigh) {
-    parseVector("NL_CUTOFF",nl_cut);
-    parseVector("NL_STRIDE",nl_st);
-    parseVector("NL_SKIN",nl_skin);
-    for (unsigned j=0; j<Nlist; j++) {
-      if(nl_cut[j]<=0.0) error("NL_CUTOFF should be explicitly specified and positive");
-      if(nl_st[j]<=0) error("NL_STRIDE should be explicitly specified and positive");
-      if(nl_skin[j]<=0.) error("NL_SKIN should be explicitly specified and positive");
-      nl_cut[j]=nl_cut[j]+nl_skin[j];
-    }
+  // Reference PDB file from which atom names, types, ids, and initial positions are determined
+  parse("REF_FILE",ref_file);
+  PDB mypdb;
+  FILE* fp=fopen(ref_file.c_str(),"r");
+  if (fp!=NULL) {
     if (enableLog) {
-      log << "Creating Neighbor Lists \n";
+      log<<"Opening PDB file with reference frame: "<<ref_file.c_str()<<"\n";
     }
-    // SD -- nlall is a neighbor list created using list all. nl_cut[0] and nl_st[0] are probably not needed.
-    // WARNING: is nl_cut meaningful here?
-    nlall= new NeighborList(listall,true,pbc,getPbc(),comm,nl_cut[0],nl_st[0]);
-    unsigned ncnt=0;
-    // Direct blocks AA, BB, CC, ...
-    if(direct) {
-      for (unsigned j=0; j<Natm; j++) {
-        nl[ncnt]= new NeighborList(Plist[j],true,pbc,getPbc(),comm,nl_cut[j],nl_st[j]);
-        ncnt+=1;
-      }
+    mypdb.readFromFilepointer(fp,plumed.getAtoms().usingNaturalUnits(),0.1/atoms.getUnits().getLength());
+    fclose (fp);
+  } else {
+    error("Error in reference PDB file");
+  }
+
+  // Create variable to get number of blocks
+  parse("N_BLOCKS",N_Blocks);
+
+  // These all need to be initialized to take the relevant parameters
+  // from all blocks
+  block_params.resize(N_Blocks);
+  block_groups_atom_list.resize(N_Blocks);
+  block_lengths.resize(N_Blocks);
+  G1_limits.resize(N_Blocks);
+  Exclude_Pairs.resize(N_Blocks);
+  ID_list.resize(N_Blocks);
+  ResID_list.resize(N_Blocks);
+  Name_list.resize(N_Blocks);
+
+  for (unsigned n=0; n<N_Blocks; n++) {
+    G1_limits[n]=0;
+    ID_list[n].resize(2);
+    ResID_list[n].resize(2);
+    Name_list[n].resize(2);
+  }
+
+  // Check that the correct number of Blocks are specified
+  for (unsigned n=0; n<N_Blocks; n++) {
+    if( !parseNumbered( "BLOCK", n+1, block_params[n] ) ) break;
+  }
+
+  FILE *parse_test = NULL;
+                                                                              
+  string parse_test_fileName = "ParseTest.dat";                                    
+  parse_test = fopen(parse_test_fileName.c_str(), "w+");
+
+  // Parse blocks for keywords
+  for(int n=0; n<N_Blocks; n++){
+    int block_length;
+    int limit_per_G1=0;
+    std::vector<AtomNumber> ex_pairs_n;
+    std::vector<AtomNumber> g1_ids;
+    std::vector<AtomNumber> g2_ids;
+    std::vector<int> g1_resids;
+    std::vector<int> g2_resids;
+    std::vector<string> g1_names;
+    std::vector<string> g2_names;
+    // fprintf(parse_test, "Block Params (%d):\n", n);
+    // fprintf(parse_test, "%s\n", block_params[n].c_str());
+    std::vector<string> block_data=Tools::getWords(block_params[n]);
+    // fprintf(parse_test, "Block Data (%d):\n", n);
+    // for(int x=0; x<block_data.size(); x++){
+    //   fprintf(parse_test, "%s\n", block_data[x].c_str());
+    // }
+    //vector<string> G1_data=Tools::getWords(block_data[0]);
+    std::vector<string> G1_data;
+    Tools::parseVector(block_data, "G1", G1_data);
+    // fprintf(parse_test, "Block Data [0] (G1):\n", n);
+    // for(int x=0; x<G1_data.size(); x++){
+    //   fprintf(parse_test, "%s\n", G1_data[x].c_str());
+    // }
+    // fprintf(parse_test, "Block Data [1] (G2):\n", n);
+    std::vector<string> G2_data;
+    Tools::parseVector(block_data, "G2", G2_data);
+    // for(int x=0; x<G2_data.size(); x++){
+    //   fprintf(parse_test, "%s\n", G2_data[x].c_str());
+    // }
+    Tools::parseVector(G1_data,"ATOMID",g1_ids);
+    // fprintf(parse_test, "g1_ids size: %d\n", g1_ids.size());
+    for(int i=0; i<g1_ids.size(); i++){
+      ID_list[n][0].push_back(g1_ids[i]);
+      // fprintf(parse_test, "%d\n", g1_ids[i]);
     }
 
-    // Cross blocks AB, AC, BC, ...
-    if(cross) {
-      // -- SD No changes here. nl depends on Plist for each j. Plist for each j = [0, Num of atoms of type j]
-      // -- SD example: if j=0 corresponds to C1, Plist[0] = [0] because there is only one C1; if is OW, it is [0, 1, 2, ... Nwaters]
-      for (unsigned j=0; j<Natm; j++) {
-        for (unsigned i=j+1; i<Natm; i++) {
-          // This accounts for the case where Nlist != Natm*(Natm-1)/2 (when solv_blocks = 3)
-          if (ncnt < Nlist) {
-            nl[ncnt]= new NeighborList(Plist[i],Plist[j],true,false,pbc,getPbc(),comm,nl_cut[ncnt],nl_st[ncnt]);
-          }
-          ncnt+=1;
+    Tools::parseVector(G2_data,"ATOMID",g2_ids);
+    // fprintf(parse_test, "g2_ids size: %d\n", g2_ids.size());
+    for(int i=0; i<g2_ids.size(); i++){
+      ID_list[n][1].push_back(g2_ids[i]);
+      // fprintf(parse_test, "%d\n", g2_ids[i]);
+    }
+    Tools::parseVector(G1_data,"RESID",g1_resids);
+    // fprintf(parse_test, "g1_resids size: %d\n", g1_resids.size());
+    for(int i=0; i<g1_resids.size(); i++){
+      ResID_list[n][0].push_back(g1_resids[i]);
+      // fprintf(parse_test, "%d\n", g1_resids[i]);
+    }
+    Tools::parseVector(G2_data,"RESID",g2_resids);
+    // fprintf(parse_test, "g2_resids size: %d\n", g2_resids.size());
+    for(int i=0; i<g2_resids.size(); i++){
+      ResID_list[n][1].push_back(g2_resids[i]);
+      // fprintf(parse_test, "%d\n", g2_resids[i]);
+    }
+    Tools::parseVector(G1_data,"NAME",g1_names);
+    // fprintf(parse_test, "g1_names size: %d\n", g1_names.size());
+    for(int i=0; i<g1_names.size(); i++){
+      Name_list[n][0].push_back(g1_names[i]);
+      // fprintf(parse_test, "%s\n", g1_names[i].c_str());
+    }
+    Tools::parseVector(G2_data,"NAME",g2_names);
+    // fprintf(parse_test, "g2_names size: %d\n", g2_names.size());
+    for(int i=0; i<g2_names.size(); i++){
+      Name_list[n][1].push_back(g2_names[i]);
+      // fprintf(parse_test, "%s\n", g2_names[i].c_str());
+    }
+    
+    // fprintf(parse_test, "%d\n", g1_ids);
+    // fprintf(parse_test, "%d\n", g2_ids);
+    // fprintf(parse_test, "%d\n", g1_resids);
+    // fprintf(parse_test, "%d\n", g2_resids);
+
+
+    Tools::parse(block_data, "SIZE", block_length);
+    block_lengths[n]=block_length;
+    Tools::parseVector(block_data,"EXCLUDE_PAIRS",ex_pairs_n);
+    for(int i=0; i<ex_pairs_n.size(); i++){
+      Exclude_Pairs[n].push_back(ex_pairs_n[i]);
+    }
+    Tools::parse(block_data,"LIMIT_PER_G1",limit_per_G1);
+    fprintf(parse_test, "Limit per G1: %d\n", limit_per_G1);
+    if(limit_per_G1>0){
+      G1_limits[n]=limit_per_G1;
+    }
+  }
+
+  fprintf(parse_test, "N_Blocks = %d\n\n\n", N_Blocks);
+  //fprintf(parse_test, "Block Params:\n");
+  for(int n=0; n<N_Blocks; n++){
+    //fprintf(parse_test, "%s\n", block_params[n].c_str());
+    fprintf(parse_test, "Block %d\n", n);
+    for(int g=0; g<2; g++){
+      fprintf(parse_test, "ID List G%d:\n", (g+1));
+      for(int f=0; f<ID_list[n][g].size(); f++){
+        fprintf(parse_test, "%d\t", ID_list[n][g][f]);
+      }
+      fprintf(parse_test, "\n");
+    }
+    for(int g=0; g<2; g++){
+      fprintf(parse_test, "RESID List G%d:\n", (g+1));
+      for(int f=0; f<ResID_list[n][g].size(); f++){
+        fprintf(parse_test, "%d\t", ResID_list[n][g][f]);
+      }
+      fprintf(parse_test, "\n");
+    }
+    for(int g=0; g<2; g++){
+      fprintf(parse_test, "Name List G%d:\n", (g+1));
+      for(int f=0; f<Name_list[n][g].size(); f++){
+        fprintf(parse_test, "%s\t", Name_list[n][g][f].c_str());
+      }
+      fprintf(parse_test, "\n");
+    }
+    fprintf(parse_test, "Block Length: %d\n", block_lengths[n]);
+    fprintf(parse_test, "Exclude Pairs: \n");
+    for(int f=0; f<Exclude_Pairs[n].size(); f++){
+      fprintf(parse_test, "%d\t", Exclude_Pairs[n][f]);
+    }
+    fprintf(parse_test, "\n");
+  }
+  fclose(parse_test);
+  exit();
+
+  // In previous section build filter lists to use in building atom lists
+  // ID_list, Resid_list, and Name_list are all vectors of dimension N_blocks x 2 (G1/G2) x n components
+  // The union of filters is then easy by checking for each block if more than one list has entries
+
+  // The parser will almost certainly require more work but for now I'm moving
+  // on with the assumption that I've been able to parse the plumed file
+  // and now I need to generate nl_all and nl_blocks efficiently
+  filters.resize(N_Blocks); //N blocks, two groups, three filters
+  for(int n=0; n<N_Blocks; n++){
+    filters[n].resize(2);
+  }
+  for(int n=0; n<N_Blocks; n++){
+    for(int g=0; g<2; g++){
+      filters[n][g].resize(3);
+    }
+  }
+  for(int n=0; n<N_Blocks; n++){
+    for(int g=0; g<2; g++){
+      for(int f=0; f<3; f++){
+        filters[n][g][f]=false;
+      }
+    }
+  }
+  for(int n=0; n<N_Blocks; n++){
+    // pseudo-code ish
+    for(int g=0; g<2; g++){
+      if(ID_list[n][g].size()>0){
+        filters[n][g][0]=true;
+      }
+      if(ResID_list[n][g].size()>0){
+        filters[n][g][1]=true;
+      }
+      if(Name_list[n][g].size()>0){
+        filters[n][g][2]=true;
+      }
+    }
+  }
+
+  // Not sure if the outer loop should be over n blocks or over i indices
+  listall.clear();
+  // Need to add code for global atom list
+  for(int i; i<mypdb.getAtomNumbers().size(); i++){
+    AtomNumber ind=mypdb.getAtomNumbers()[i];
+    int resid=mypdb.getResidueNumber(ind);
+    string atom_name=mypdb.getAtomName(ind);
+    bool atom_added = false;
+    for(int n=0; n<N_Blocks; n++){
+      for(int g=0; g<2; g++){
+        // Boolean to integer conversion
+        bool id_check = false;
+        bool res_check = false;
+        bool name_check = false;
+        int caseIndex = filters[n][g][2] * 4 + filters[n][g][1] * 2 + filters[n][g][0];
+        switch(caseIndex) {
+          case 0: // 000 in binary (false, false, false)
+            // An error should be thrown here because it means
+            // that a block was defined without any filter specifications
+            error("Error: Block" + std::to_string(n) + ", Group" + std::to_string(g) + " has no identifier corresponding to ATOMID, RESID, or NAME");
+            break;
+          case 1: // 001 in binary (false, false, true)
+            for(int f=0; f<ID_list[n][g].size(); f++){
+              if(ind==ID_list[n][g][f]){
+                block_groups_atom_list[n][g].push_back(ind);
+                ID_list[n][g].erase(ID_list[n][g].begin() + f);
+                atom_added = true;
+                break;
+              }
+            }
+            break;
+          case 2: // 010 in binary (false, true, false)
+            for(int f=0; f<ResID_list[n][g].size(); f++){
+              if(resid==ResID_list[n][g][f]){
+                block_groups_atom_list[n][g].push_back(ind);
+                atom_added = true;
+                break;
+              }
+            }
+            break;
+          case 3: // 011 in binary (false, true, true)
+            // This case shouldn't really happen because there would never be a
+            // reason to add another identifier if the AtomID is present
+            // but is included to make the code more flexible for
+            // inexperienced users
+            for(int f=0; f<ID_list[n][g].size(); f++){
+              if(ind==ID_list[n][g][f]){
+                id_check = true;
+                break;
+              }
+            }
+            if(id_check){
+              block_groups_atom_list[n][g].push_back(ind);
+              atom_added = true;
+            }
+            break;
+            // for(int f=0; f<ResID_list[n][g].size(); f++){
+            //   if(resid==ResID_list[n][g][f]){
+            //     res_check = true;
+            //     break;
+            //   }
+            // }
+            // if(res_check && id_check){
+            //   block_groups_atom_list[n][g].push_back(ind);
+            //   atom_added = true;
+            // }
+            // break;
+            break;
+          case 4: // 100 in binary (true, false, false)
+            for(int f=0; f<Name_list[n][g].size(); f++){
+              if(atom_name==Name_list[n][g][f]){
+                block_groups_atom_list[n][g].push_back(ind);
+                atom_added = true;
+                break;
+              }
+            }
+            break;
+          case 5: // 101 in binary (true, false, true)
+            // This case shouldn't really happen because there would never be a
+            // reason to add another identifier if the AtomID is present
+            // but is included to make the code more flexible for
+            // inexperienced users
+            for(int f=0; f<ID_list[n][g].size(); f++){
+              if(ind==ID_list[n][g][f]){
+                id_check = true;
+                break;
+              }
+            }
+            if(id_check){
+              block_groups_atom_list[n][g].push_back(ind);
+              atom_added = true;
+            }
+            break;
+            // for(int f=0; f<Name_list[n][g].size(); f++){
+            //   if(atom_name==Name_list[n][g][f]){
+            //     name_check = true;
+            //     break;
+            //   }
+            // }
+            // if(name_check && id_check){
+            //   block_groups_atom_list[n][g].push_back(ind);
+            //   atom_added = true;
+            // }
+            // break;
+            break;
+          case 6: // 110 in binary (true, true, false)
+            for(int f=0; f<ResID_list[n][g].size(); f++){
+              if(resid==ResID_list[n][g][f]){
+                res_check = true;
+                break;
+              }
+            }
+            for(int f=0; f<Name_list[n][g].size(); f++){
+              if(atom_name==Name_list[n][g][f]){
+                name_check = true;
+                break;
+              }
+            }
+            if(res_check && name_check){
+              block_groups_atom_list[n][g].push_back(ind);
+              atom_added = true;
+            }
+            break;
+          case 7: // 111 in binary (true, true, true)
+            // This case shouldn't really happen because there would never be a
+            // reason to add another identifier if the AtomID is present
+            // but is included to make the code more flexible for
+            // inexperienced users
+            for(int f=0; f<ID_list[n][g].size(); f++){
+              if(ind==ID_list[n][g][f]){
+                id_check = true;
+                break;
+              }
+            }
+            if(id_check){
+              block_groups_atom_list[n][g].push_back(ind);
+              atom_added = true;
+            }
+            break;
+            // for(int f=0; f<ResID_list[n][g].size(); f++){
+            //   if(resid==ResID_list[n][g][f]){
+            //     res_check = true;
+            //     break;
+            //   }
+            // }
+            // for(int f=0; f<Name_list[n][g].size(); f++){
+            //   if(atom_name==Name_list[n][g][f]){
+            //     name_check = true;
+            //     break;
+            //   }
+            // }
+            // if(res_check && name_check && ind_check){
+            //   block_groups_atom_list[n][g].push_back(ind);
+            //   atom_added = true;
+            // }
+            // break;
         }
       }
+    }
+    if(atom_added){
+      listall.push_back(ind);
+    }
+  }
 
+  parseVector("NL_CUTOFF",nl_cut);
+  parseVector("NL_STRIDE",nl_st);
+  parseVector("NL_SKIN",nl_skin);
+  for (unsigned n=0; n<N_Blocks; n++) {
+    if(nl_cut[n]<=0.0) error("NL_CUTOFF should be explicitly specified and positive");
+    if(nl_st[n]<=0) error("NL_STRIDE should be explicitly specified and positive");
+    if(nl_skin[n]<=0.) error("NL_SKIN should be explicitly specified and positive");
+    nl_cut[n]=nl_cut[n]+nl_skin[n];
+  }
+
+  nlall= new NeighborList(listall,true,pbc,getPbc(),comm,9999999,0);
+  for(int n=0; n<N_Blocks; n++){
+    nl[n]= new NeighborList(block_groups_atom_list[n][0],block_groups_atom_list[n][1],true,false,pbc,getPbc(),comm,nl_cut[n],nl_st[n]);
+  }
+  // nlall is the full atomlist of all possible relevant atoms
+  // nl is the smaller atomlist (built from nlall info) of all interactions within a given cutoff distance + buffer distance
+  // nl_small is the smallest atomlist (built from nl info) of all interactions within a given proximal number + buffer number
+
+
+  if(getStep()==0) {
+    std::vector<vector<AtomNumber>> snn_list;
+    std::vector<vector<AtomNumber>> Hydrogen_nn_list;
+    std::vector<double> snn_mags;
+    std::vector<AtomNumber> all_ids;
+    std::vector<double> all_mags;
+    std::vector<AtomNumber> total_waterOx_list;
+    std::vector<AtomNumber> total_waterHydrogen_list;
+    int Nlist_count;
+
+    // Sized for Natm - solvent atom 
+    if (solv_blocks == 3) {
+      Hydrogen_nn_list.resize(Natm-2);
+      snn_list.resize(Natm-2);
+    } else {
+      Hydrogen_nn_list.resize(Natm-1);
+      snn_list.resize(Natm-1);
     }
 
-    if(getStep()==0) {
-      std::vector<vector<AtomNumber>> snn_list;
-      std::vector<vector<AtomNumber>> Hydrogen_nn_list;
-      std::vector<double> snn_mags;
-      std::vector<AtomNumber> all_ids;
-      std::vector<double> all_mags;
-      std::vector<AtomNumber> total_waterOx_list;
-      std::vector<AtomNumber> total_waterHydrogen_list;
-      int Nlist_count;
+    Vector ddist;
+    double smallest_val;
+    Nlist_count=0;
 
-      // Sized for Natm - solvent atom 
-      if (solv_blocks == 3) {
-        Hydrogen_nn_list.resize(Natm-2);
-        snn_list.resize(Natm-2);
-      } else {
-        Hydrogen_nn_list.resize(Natm-1);
-        snn_list.resize(Natm-1);
-      }
-
-      Vector ddist;
-      double smallest_val;
-      Nlist_count=0;
-
-      for(unsigned j=0; j<Natm; j++) {
-        for(unsigned i=j+1; i<Natm; i++) {
-          if( (atype[i] == "OW") || ((solv_blocks == 2) && (atype[i] == "HW1")) ) {
-            all_mags.clear();
-            all_ids.clear();
+    for(unsigned j=0; j<Natm; j++) {
+      for(unsigned i=j+1; i<Natm; i++) {
+        if( (atype[i] == "OW") || ((solv_blocks == 2) && (atype[i] == "HW1")) ) {
+          all_mags.clear();
+          all_ids.clear();
+          
+          for(unsigned k=0; k<nl[Nlist_count]->size(); k++) {
+            unsigned id0=(nl[Nlist_count]->getClosePairAtomNumber(k).first).index();
+            unsigned id1=(nl[Nlist_count]->getClosePairAtomNumber(k).second).index();
+            Vector Pos0,Pos1;
+            double mag;
             
-            for(unsigned k=0; k<nl[Nlist_count]->size(); k++) {
-              unsigned id0=(nl[Nlist_count]->getClosePairAtomNumber(k).first).index();
-              unsigned id1=(nl[Nlist_count]->getClosePairAtomNumber(k).second).index();
-              Vector Pos0,Pos1;
-              double mag;
-              
-              Pos0=mypdb.getPosition(listall[id0]);
-              Pos1=mypdb.getPosition(listall[id1]);
+            Pos0=mypdb.getPosition(listall[id0]);
+            Pos1=mypdb.getPosition(listall[id1]);
 
-              ddist=pbcDistance(Pos0,Pos1);
-              mag=ddist.modulo();
+            ddist=pbcDistance(Pos0,Pos1);
+            mag=ddist.modulo();
 
-              all_mags.push_back(mag);
-              all_ids.push_back(listall[id0]);
+            all_mags.push_back(mag);
+            all_ids.push_back(listall[id0]);
+          }
+          for(unsigned x=0; x<NL_const_size+10; x++) {
+            smallest_val = all_mags[0];
+            int nl_pos = 0;
+            for(unsigned y=0; y<all_mags.size(); y++) {
+              if(smallest_val > all_mags[y]) {
+                smallest_val = all_mags[y];
+                nl_pos = y;
+              }
             }
-            for(unsigned x=0; x<NL_const_size+10; x++) {
-              smallest_val = all_mags[0];
-              int nl_pos = 0;
-              for(unsigned y=0; y<all_mags.size(); y++) {
-                if(smallest_val > all_mags[y]) {
-                  smallest_val = all_mags[y];
-                  nl_pos = y;
+            snn_mags.push_back(smallest_val);
+            snn_list[j].push_back(all_ids[nl_pos]);
+
+            // If water hydrogen are included, 
+            // find them by residue ID
+            unsigned atom_indx = listall.size();
+            if (solv_blocks > 1) {
+              for(unsigned k=0; k<listall.size(); k++) {
+                if (listall[k] == all_ids[nl_pos]) {
+                  atom_indx = k;
                 }
               }
-              snn_mags.push_back(smallest_val);
-              snn_list[j].push_back(all_ids[nl_pos]);
-
-              // If water hydrogen are included, 
-              // find them by residue ID
-              unsigned atom_indx = listall.size();
-              if (solv_blocks > 1) {
-                for(unsigned k=0; k<listall.size(); k++) {
-                  if (listall[k] == all_ids[nl_pos]) {
-                    atom_indx = k;
-                  }
-                }
-                for(unsigned k=0; k<listall.size(); k++) {
-                  if (AtomToResID_Dict[atom_indx] == AtomToResID_Dict[k]) {
-                    if( (solv_blocks == 3) && (atom_indx != k) ){
-                      Hydrogen_nn_list[j].push_back(listall[k]);
-                    } else if ( (solv_blocks == 2) ) {
-                      Hydrogen_nn_list[j].push_back(listall[k]);
-                    }
+              for(unsigned k=0; k<listall.size(); k++) {
+                if (AtomToResID_Dict[atom_indx] == AtomToResID_Dict[k]) {
+                  if( (solv_blocks == 3) && (atom_indx != k) ){
+                    Hydrogen_nn_list[j].push_back(listall[k]);
+                  } else if ( (solv_blocks == 2) ) {
+                    Hydrogen_nn_list[j].push_back(listall[k]);
                   }
                 }
               }
+            }
 
-              all_mags[nl_pos] = 99999;
-              if(total_waterOx_list.empty()) {
+            all_mags[nl_pos] = 99999;
+            if(total_waterOx_list.empty()) {
+              total_waterOx_list.push_back(all_ids[nl_pos]);
+            } else {
+              bool id_present=false;
+              for(unsigned y=0; y<total_waterOx_list.size(); y++) {
+                if(all_ids[nl_pos] == total_waterOx_list[y]) {
+                  id_present=true;
+                }
+              }
+              if(!id_present) {
                 total_waterOx_list.push_back(all_ids[nl_pos]);
-              } else {
-                bool id_present=false;
-                for(unsigned y=0; y<total_waterOx_list.size(); y++) {
-                  if(all_ids[nl_pos] == total_waterOx_list[y]) {
-                    id_present=true;
-                  }
-                }
-                if(!id_present) {
-                  total_waterOx_list.push_back(all_ids[nl_pos]);
-                }
               }
-              // If hydrogen IDs aren't in the total ID list, add them
-              if (solv_blocks > 1) {
-                if (std::find(total_waterHydrogen_list.begin(), total_waterHydrogen_list.end(), Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-2]) == total_waterHydrogen_list.end()) {
-                  total_waterHydrogen_list.push_back(Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-2]);
-                }
-                if (std::find(total_waterHydrogen_list.begin(), total_waterHydrogen_list.end(), Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-1]) == total_waterHydrogen_list.end()) {
-                  total_waterHydrogen_list.push_back(Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-1]);
-                }
+            }
+            // If hydrogen IDs aren't in the total ID list, add them
+            if (solv_blocks > 1) {
+              if (std::find(total_waterHydrogen_list.begin(), total_waterHydrogen_list.end(), Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-2]) == total_waterHydrogen_list.end()) {
+                total_waterHydrogen_list.push_back(Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-2]);
+              }
+              if (std::find(total_waterHydrogen_list.begin(), total_waterHydrogen_list.end(), Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-1]) == total_waterHydrogen_list.end()) {
+                total_waterHydrogen_list.push_back(Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-1]);
               }
             }
           }
-          Nlist_count += 1;
         }
+        Nlist_count += 1;
       }
-      // // fclose(debugging_file);
-      if (solv_blocks > 0) {
-        std::sort(total_waterOx_list.begin(), total_waterOx_list.end());
+    }
+    // // fclose(debugging_file);
+    if (solv_blocks > 0) {
+      std::sort(total_waterOx_list.begin(), total_waterOx_list.end());
+    }
+    listreduced.clear();
+    listnonwater.clear();
+    for (unsigned j=0; j<Natm; j++) {
+      for (unsigned i=0; i<mypdb.getAtomNumbers().size(); i++) {
+        // SD --- including only user defined atom types;
+        AtomNumber at_num = mypdb.getAtomNumbers()[i];                                                                        
+        // ResidueName/Atomname associated to atom                                                                        
+        string at_name = mypdb.getAtomName(at_num);                                                                             
+        if( (at_name == atype[j]) && ( (at_name != "OW") && (at_name != "HW1") && (at_name != "HW2") ) ) {
+          // -- SD listall should contain the actual atom numbers in the PDB file.
+          listnonwater.push_back(at_num);
+        }
+        if( (direct) && ( (at_name == "C12") || (at_name == "C43") || (at_name == "C56") ) ) {
+          listnonwater.push_back(at_num);
+        }                                                                                                               
+      }                                                                                                                 
+    }
+    listreduced = listnonwater;
+    // Add solvent IDs to the total ID list
+    if (solv_blocks == 1) {
+      for(unsigned i=0; i<total_waterOx_list.size(); i++) {
+        listreduced.push_back(total_waterOx_list[i]);
       }
-      listreduced.clear();
-      listnonwater.clear();
-      for (unsigned j=0; j<Natm; j++) {
-        for (unsigned i=0; i<mypdb.getAtomNumbers().size(); i++) {
-          // SD --- including only user defined atom types;
-          AtomNumber at_num = mypdb.getAtomNumbers()[i];                                                                        
-          // ResidueName/Atomname associated to atom                                                                        
-          string at_name = mypdb.getAtomName(at_num);                                                                             
-          if( (at_name == atype[j]) && ( (at_name != "OW") && (at_name != "HW1") && (at_name != "HW2") ) ) {
-            // -- SD listall should contain the actual atom numbers in the PDB file.
-            listnonwater.push_back(at_num);
+    } else if (solv_blocks == 2) {
+      for(unsigned i=0; i<total_waterHydrogen_list.size(); i++) {
+        listreduced.push_back(total_waterHydrogen_list[i]);
+      }
+    } else if (solv_blocks == 3) {
+      for(unsigned i=0; i<total_waterOx_list.size(); i++) {
+        listreduced.push_back(total_waterOx_list[i]);
+        listreduced.push_back(total_waterHydrogen_list[i*2]);
+        listreduced.push_back(total_waterHydrogen_list[i*2+1]);
+      }
+    }
+    // Match atom IDs to positional indexing in listreduced    
+    if (solv_blocks == 3) { 
+      for(unsigned j=0; j<Natm-2; j++) {
+        for(unsigned k=0; k<NL_const_size+10; k++) {
+          for(unsigned i=0; i<listreduced.size(); i++) {
+            if(snn_list[j][k]==listreduced[i]){
+              AtomNumber atom_id;
+              snn_list[j][k]=atom_id.setIndex(i);
+            }
+            if(Hydrogen_nn_list[j][2*k]==listreduced[i]){
+              AtomNumber atom_id;
+              Hydrogen_nn_list[j][2*k]=atom_id.setIndex(i);
+            }
+            if(Hydrogen_nn_list[j][2*k+1]==listreduced[i]){
+              AtomNumber atom_id;
+              Hydrogen_nn_list[j][2*k+1]=atom_id.setIndex(i);
+            }
           }
-          if( (direct) && ( (at_name == "C12") || (at_name == "C43") || (at_name == "C56") ) ) {
-            listnonwater.push_back(at_num);
-          }                                                                                                               
-        }                                                                                                                 
-      }
-      listreduced = listnonwater;
-      // Add solvent IDs to the total ID list
-      if (solv_blocks == 1) {
-        for(unsigned i=0; i<total_waterOx_list.size(); i++) {
-          listreduced.push_back(total_waterOx_list[i]);
-        }
-      } else if (solv_blocks == 2) {
-        for(unsigned i=0; i<total_waterHydrogen_list.size(); i++) {
-          listreduced.push_back(total_waterHydrogen_list[i]);
-        }
-      } else if (solv_blocks == 3) {
-        for(unsigned i=0; i<total_waterOx_list.size(); i++) {
-          listreduced.push_back(total_waterOx_list[i]);
-          listreduced.push_back(total_waterHydrogen_list[i*2]);
-          listreduced.push_back(total_waterHydrogen_list[i*2+1]);
         }
       }
-      // Match atom IDs to positional indexing in listreduced    
-      if (solv_blocks == 3) { 
-        for(unsigned j=0; j<Natm-2; j++) {
-          for(unsigned k=0; k<NL_const_size+10; k++) {
-            for(unsigned i=0; i<listreduced.size(); i++) {
+    } else {
+      for(unsigned j=0; j<Natm-1; j++) {
+        for(unsigned k=0; k<NL_const_size+10; k++) {
+          for(unsigned i=0; i<listreduced.size(); i++) {
+            if (solv_blocks == 1) {
               if(snn_list[j][k]==listreduced[i]){
                 AtomNumber atom_id;
                 snn_list[j][k]=atom_id.setIndex(i);
               }
+            }
+            if (solv_blocks == 2) {
               if(Hydrogen_nn_list[j][2*k]==listreduced[i]){
                 AtomNumber atom_id;
                 Hydrogen_nn_list[j][2*k]=atom_id.setIndex(i);
@@ -785,54 +815,32 @@ PINES::PINES(const ActionOptions&ao):
             }
           }
         }
-      } else {
-        for(unsigned j=0; j<Natm-1; j++) {
-          for(unsigned k=0; k<NL_const_size+10; k++) {
-            for(unsigned i=0; i<listreduced.size(); i++) {
-              if (solv_blocks == 1) {
-                if(snn_list[j][k]==listreduced[i]){
-                  AtomNumber atom_id;
-                  snn_list[j][k]=atom_id.setIndex(i);
-                }
-              }
-              if (solv_blocks == 2) {
-                if(Hydrogen_nn_list[j][2*k]==listreduced[i]){
-                  AtomNumber atom_id;
-                  Hydrogen_nn_list[j][2*k]=atom_id.setIndex(i);
-                }
-                if(Hydrogen_nn_list[j][2*k+1]==listreduced[i]){
-                  AtomNumber atom_id;
-                  Hydrogen_nn_list[j][2*k+1]=atom_id.setIndex(i);
-                }
-              }
-            }
-          }
-        }
       }
-      unsigned count_nl_loop=0;
-      if(cross) {
-        for(unsigned j=0; j<Natm-1; j++) {
-          for(unsigned i=j+1; i<Natm; i++) {
-            if (count_nl_loop < Nlist) {
-              if(atype[i] == "OW") {
-                nl_small[count_nl_loop] = new NeighborList(snn_list[j],Plist[j],true,false,pbc,getPbc(),comm,nl_cut[count_nl_loop],nl_st[count_nl_loop]);
-              } else if (atype[i] == "HW1") {
-                nl_small[count_nl_loop] = new NeighborList(Hydrogen_nn_list[j],Plist[j],true,false,pbc,getPbc(),comm,nl_cut[count_nl_loop],nl_st[count_nl_loop]);
-              } else {
-                nl_small[count_nl_loop] = new NeighborList(Plist[i],Plist[j],true,false,pbc,getPbc(),comm,nl_cut[ncnt],nl_st[ncnt]);
-              }
-            }
-            count_nl_loop += 1;
-          }
-        }
-      }
-      else if(direct) {
-        for(unsigned j=0; j<Plist.size(); j++) {
-          nl_small[count_nl_loop] = new NeighborList(Plist[j],Plist[j],true,false,pbc,getPbc(),comm,nl_cut[ncnt],nl_st[ncnt]);
-        }
-      }
-      nlreduced= new NeighborList(listreduced,true,pbc,getPbc(),comm,nl_cut[0],nl_st[0]);
     }
+    unsigned count_nl_loop=0;
+    unsigned ncnt=0;
+    if(cross) {
+      for(unsigned j=0; j<Natm-1; j++) {
+        for(unsigned i=j+1; i<Natm; i++) {
+          if (count_nl_loop < Nlist) {
+            if(atype[i] == "OW") {
+              nl_small[count_nl_loop] = new NeighborList(snn_list[j],Plist[j],true,false,pbc,getPbc(),comm,nl_cut[count_nl_loop],nl_st[count_nl_loop]);
+            } else if (atype[i] == "HW1") {
+              nl_small[count_nl_loop] = new NeighborList(Hydrogen_nn_list[j],Plist[j],true,false,pbc,getPbc(),comm,nl_cut[count_nl_loop],nl_st[count_nl_loop]);
+            } else {
+              nl_small[count_nl_loop] = new NeighborList(Plist[i],Plist[j],true,false,pbc,getPbc(),comm,nl_cut[ncnt],nl_st[ncnt]);
+            }
+          }
+          count_nl_loop += 1;
+        }
+      }
+    }
+    else if(direct) {
+      for(unsigned j=0; j<Plist.size(); j++) {
+        nl_small[count_nl_loop] = new NeighborList(Plist[j],Plist[j],true,false,pbc,getPbc(),comm,nl_cut[ncnt],nl_st[ncnt]);
+      }
+    }
+    nlreduced= new NeighborList(listreduced,true,pbc,getPbc(),comm,nl_cut[0],nl_st[0]);
   } else {
     if (enableLog) {
       log << "WARNING: Neighbor List not activated this has not been tested!!  \n";
@@ -854,7 +862,9 @@ PINES::PINES(const ActionOptions&ao):
   // Sorting
   dosort.resize(Nlist);
   std:: vector<int> ynsort(Nlist);
-  parseVector("SORT",ynsort);
+  for(int i=0; i<Nlist; i++){
+    ynsort[i]=1;
+  }
   if(cart2PINES) {
     for (unsigned i=0; i<Nlist; i++) {
       if(ynsort[i]==0) {
