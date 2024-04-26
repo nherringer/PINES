@@ -95,7 +95,8 @@ private:
   std::vector<std::vector<std::vector<AtomNumber>>> block_groups_atom_list;
   std::vector<int> block_lengths;
   std::vector<int> G1_limits;
-  std::vector<std::vector<AtomNumber>> Exclude_Pairs;
+  std::vector<int> Buffer_Pairs;
+  std::vector<std::vector<std::pair<AtomNumber>>> Exclude_Pairs;
   std::vector<std::vector<std::vector<AtomNumber>>> ID_list;
   std::vector<std::vector<std::vector<int>>> ResID_list;
   std::vector<std::vector<std::vector<string>>> Name_list;
@@ -112,7 +113,12 @@ public:
   static void registerKeywords( Keywords& keys );                                                                       
   explicit PINES(const ActionOptions&); 
   ~PINES();                                                                                                               
-  // active methods:                                                                                                    
+  // active methods:
+  struct CompareDist {
+    bool operator()(const std::pair<double, std::pair<AtomNumber, AtomNumber>>& p1, const std::pair<double, std::pair<AtomNumber, AtomNumber>>& p2) {
+      return p1.first < p2.first; // Max heap
+    }
+  };                                                                                             
   virtual void calculate();
   void checkFieldsAllowed() {}                                                                                           
   // -- SD prepare to requestAtoms during simulation 
