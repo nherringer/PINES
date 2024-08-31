@@ -58,6 +58,7 @@ private:
   std::vector<NeighborList *> nl_small;
   std::vector<NeighborList *> nlcom;
   std::vector<Vector> m_deriv;
+  std::vector<std:: vector<double> > PIV;
 
   // ds_array is the 1D array (dv(r)/dr) of the switching function --NH
   std::vector<double> ds_array;
@@ -101,6 +102,7 @@ private:
   std::vector<std::vector<std::vector<int>>> ResID_list;
   std::vector<std::vector<std::vector<string>>> Name_list;
   std::vector<std::vector<std::vector<bool>>> filters;
+  std::vector<std::pair<AtomNumber,AtomNumber>>pairlist;
 
 
   // dr_dxyz_array is the 3D array (dr/dxyz) used to build ann_deriv and ANN_sum_array --NH [NOT USED -- SD]

@@ -60,17 +60,8 @@ void PINES::registerKeywords( Keywords& keys )
   keys.add("optional","EXLCUDE_PAIRS","Excluded pairs");
   keys.add("optional","LIMIT_PER_G1","NN for each group 1 atom");
   keys.add("optional","BUFFER","Number of additional pairwise distances to include as a buffer for each PIV block");
-//  keys.add("optional","SFACTOR","Scale the PINES-distance by such block-specific factor");
-//  keys.add("optional","VOLUME","Scale atom-atom distances by the cubic root of the cell volume. The input volume is used to scale the R_0 value of the switching function. ");
   keys.add("optional","UPDATEPINES","Frequency (in steps) at which the PINES is updated.");
-//  keys.addFlag("TEST",false,"Print the actual and reference PINES and exit");
-//  keys.addFlag("ONLYCROSS",false,"Use only cross-terms (A-B, A-C, B-C, ...) in PINES");
-//  keys.addFlag("ONLYDIRECT",false,"Use only direct-terms (A-A, B-B, C-C, ...) in PINES");
   keys.addFlag("DERIVATIVES",false,"Activate the calculation of the PINES for every class (needed for numerical derivatives).");
-//  keys.addFlag("NLIST",false,"Use a neighbor list for distance calculations.");
-//  keys.addFlag("SERIAL",false,"Perform the calculation in serial - for debug purpose");
-//  keys.addFlag("TIMER",false,"Perform timing analysis on heavy loops.");
-//  keys.add("optional","NL_CONSTANT_SIZE","Fix the number of elements in all blocks to be constant. Blocks which have a total number of possible elements less than the chosen constant size will not be affected.");
   keys.add("optional","NL_CUTOFF","Neighbor lists cutoff.");
   keys.add("optional","NL_STRIDE","Update neighbor lists every NL_STRIDE steps. When post-processing a trajectory a stride of 1 should always be used.");
   keys.add("optional","NL_SKIN","The maximum atom displacement tolerated for the neighbor lists update.");
@@ -89,46 +80,31 @@ void PINES::registerKeywords( Keywords& keys )
 PINES::PINES(const ActionOptions&ao):
   PLUMED_COLVAR_INIT(ao),
   pbc(true),
-//  serial(false),
-//  timer(false),
-//  NL_const_size(0),
   updatePINES(1),
   Nprec(1000),
   Natm(1),
   Nlist(1),
   NLsize(1),
   Fvol(1.),
-//  Vol0(0.),
   m_PINESdistance(0.),
   solv_blocks(1),
-//  scaling(std:: vector<double>(Nlist)),
   r00(std:: vector<double>(Nlist)),
   nl_skin(std:: vector<double>(Nlist)),
   fmass(std:: vector<double>(Nlist)),
-//  dosort(std:: vector<bool>(Nlist)),
   sw(std:: vector<string>(Nlist)),
   nl(std:: vector<NeighborList *>(Nlist)),
   nl_small(std:: vector<NeighborList *>(Nlist)),
   m_deriv(std:: vector<Vector>(1)),
   ds_array(std:: vector<double>(1)),
   ann_deriv(std:: vector<std:: vector<Vector> >(1)),
+  PIV(std:: vector<std:: vector<double> >(1)),
   PINES_Pair0(std:: vector<int>(1)),
   PINES_Pair1(std:: vector<int>(1)),
   Plist(std:: vector<std:: vector<AtomNumber> >(1)),
   listall(std:: vector<AtomNumber>(1)),
-//  AtomToResID_Dict(std:: vector<unsigned>(1)),
-//  NList_OW_blocks(std:: vector<unsigned>(1)),
-//  NList_HW_blocks(std:: vector<unsigned>(1)),
   listreduced(std:: vector<AtomNumber>(1)),
-// listnonwater(std:: vector<AtomNumber>(1)),
-//  atype(std:: vector<string>(1)),
   nl_cut(std:: vector<double>(Nlist)),
   nl_st(std:: vector<int>(Nlist)),
-//  Svol(false),
-//  cross(true),
-//  direct(true),
-//  doneigh(false),
-//  test(false),
   CompDer(false),
   // SD -- local variables corresponding to user defined flags.
   writePINEStraj(false),
@@ -149,6 +125,7 @@ PINES::PINES(const ActionOptions&ao):
   ResID_list(std:: vector<std:: vector<std:: vector<int> > >(1)),
   Name_list(std:: vector<std:: vector<std:: vector<string> > >(1)),
   filters(std:: vector<std:: vector<std:: vector<bool> > >(1)),
+  pairlist(std:: vector<std:: pair<AtomNumber, AtomNumber> > (1)),
   N_Blocks(1)
 {
   if(keywords.exists("ENABLE_LOG")) {
@@ -421,9 +398,6 @@ PINES::PINES(const ActionOptions&ao):
   // ID_list, Resid_list, and Name_list are all vectors of dimension N_blocks x 2 (G1/G2) x n components
   // The union of filters is then easy by checking for each block if more than one list has entries
 
-  // The parser will almost certainly require more work but for now I'm moving
-  // on with the assumption that I've been able to parse the plumed file
-  // and now I need to generate nl_all and nl_blocks efficiently
   filters.resize(N_Blocks); //N blocks, two groups, three filters
   for(int n=0; n<N_Blocks; n++){
     filters[n].resize(2);
@@ -480,6 +454,7 @@ PINES::PINES(const ActionOptions&ao):
             for(int f=0; f<ID_list[n][g].size(); f++){
               if(ind==ID_list[n][g][f]){
                 block_groups_atom_list[n][g].push_back(ind);
+                // Why am I erasing the ID here? Somethings the world may never know...
                 ID_list[n][g].erase(ID_list[n][g].begin() + f);
                 atom_added = true;
                 break;
@@ -619,31 +594,18 @@ PINES::PINES(const ActionOptions&ao):
     }
   }
 
-  // parseVector("NL_CUTOFF",nl_cut);
-  // parseVector("NL_STRIDE",nl_st);
-  // parseVector("NL_SKIN",nl_skin);
-  // for (unsigned n=0; n<N_Blocks; n++) {
-  //   if(nl_cut[n]<=0.0) error("NL_CUTOFF should be explicitly specified and positive");
-  //   if(nl_st[n]<=0) error("NL_STRIDE should be explicitly specified and positive");
-  //   if(nl_skin[n]<=0.) error("NL_SKIN should be explicitly specified and positive");
-  //   nl_cut[n]=nl_cut[n]+nl_skin[n];
-  // }
-
-  // nlall= new NeighborList(listall,true,pbc,getPbc(),comm,9999999,0);
-  // for(int n=0; n<N_Blocks; n++){
-  //   nl[n]= new NeighborList(block_groups_atom_list[n][0],block_groups_atom_list[n][1],true,false,pbc,getPbc(),comm,nl_cut[n],nl_st[n]);
-  // }
-  // nlall is the full atomlist of all possible relevant atoms
-  // nl is the smaller atomlist (built from nlall info) of all interactions within a given cutoff distance + buffer distance
-  // nl_small is the smallest atomlist (built from nl info) of all interactions within a given proximal number + buffer number
-
 // Should I have a counter to determine stride updates? If a tolerance update is triggered a step before a stride
 // update would have been triggered it is inefficient to immediately update again. The stride update should be the
 // stride since the last update, whether from stride or tolerance.
 
+
 // Should I use AtomNumber or index in block_groups_atom_list to specify atom pairs?
   if(getStep()==0){
-  std::vector<std::priority_queue<std::pair<double, std::pair<AtomNumber, AtomNumber>>, std::vector<std::pair<double, std::pair<AtomNumber, AtomNumber>>>, CompareDist>> maxHeap;
+  using AtomPair = std::pair<AtomNumber, AtomNumber>;
+  using DistAtomPair = std::pair<double, AtomPair>;
+  using MaxHeap = std::priority_queue<DistAtomPair, std::vector<DistAtomPair>, CompareDist>;
+  using MaxHeapVector = std::vector<MaxHeap>;
+  MaxHeapVector maxHeapVec;
     for(int n=0; n<N_Blocks; n++){
       int tot_num_pairs = block_lengths[n] + Buffer_Pairs[n];
       for(int i=0; i<block_groups_atom_list[n][0].size(); i++){
@@ -652,83 +614,30 @@ PINES::PINES(const ActionOptions&ao):
         Pos0=mypdb.getPosition(ind0);
         for(int j=0; j<block_groups_atom_list[n][1].size(); j++){
           AtomNumber ind1=block_groups_atom_list[n][1][j];
-          std::pair<AtomNumber,AtomNumber> test_pair={ind0,ind1};
+          AtomPair test_pair={ind0,ind1};
           if(Exclude_Pairs[n].find(test_pair) != Exclude_Pairs[n].end()){
             continue;
           }
           Pos1=mypdb.getPosition(ind1);
           ddist=pbcDistance(Pos0,Pos1);
           mag=ddist.modulo();
-          if(maxHeap[n].size() < tot_num_pairs){
-            maxHeap[n].push({mag, {ind0,ind1}});
-          } else if (mag < maxHeap[n].top().first) {
-            maxHeap[n].pop();
-            maxHeap[n].push({mag, {ind0,ind1}});
+          if(maxHeapVec[n].size() < tot_num_pairs){
+            maxHeapVec[n].push_back({mag, {ind0,ind1}});
+          } else if (mag < maxHeapVec[n].top().first) {
+            maxHeapVec[n].pop();
+            maxHeapVec[n].push_back({mag, {ind0,ind1}});
           }
         }
       }
     }
+    int steps_since_update=1;
   }
   if (enableLog) {
     log << "Total Nlists: " << N_Blocks << " \n";
     for (unsigned n=0; n<N_Blocks; n++) {
-      log << "  PIV Block " << n+1 << " + Buffer: " << maxHeap[n] << " Pairs\n";
+      log << "  PIV Block " << n+1 << " + Buffer: " << maxHeapVec[n] << " Pairs\n";
     }
   }
-
-
-  // // Sorting
-  // dosort.resize(Nlist);
-  // std:: vector<int> ynsort(Nlist);
-  // for(int i=0; i<Nlist; i++){
-  //   ynsort[i]=1;
-  // }
-  // if(cart2PINES) {
-  //   for (unsigned i=0; i<Nlist; i++) {
-  //     if(ynsort[i]==0) {
-  //       dosort[i]=false;
-  //     } else {
-  //       dosort[i]=true;
-  //     }
-  //   }
-  // } else {
-  //   for (unsigned i=0; i<Nlist; i++) {
-  //     if(ynsort[i]==0||CompDer) {
-  //       dosort[i]=false;
-  //     } else {
-  //       dosort[i]=true;
-  //     }
-  //   }
-  // }
-  // //build box vectors and correct for pbc
-  // if (enableLog) {
-  //   log << "Building the box from PDB data ... \n";
-  // }
-  // Tensor Box=mypdb.getBoxVec();
-  // if (enableLog) {
-  //   log << "  Done! A,B,C vectors in Cartesian space:  \n";
-  //   log.printf("  A:  %12.6f%12.6f%12.6f\n", Box[0][0],Box[0][1],Box[0][2]);
-  //   log.printf("  B:  %12.6f%12.6f%12.6f\n", Box[1][0],Box[1][1],Box[1][2]);
-  //   log.printf("  C:  %12.6f%12.6f%12.6f\n", Box[2][0],Box[2][1],Box[2][2]);
-  //   log << "Changing the PBC according to the new box \n";
-  // }
-  // Pbc mypbc;
-  // mypbc.setBox(Box);
-  // if (enableLog) {
-  //   log << "The box volume is " << mypbc.getBox().determinant() << " \n";
-  // }
-
-  // //Compute scaling factor
-  // if(Svol) {
-  //   Fvol=cbrt(Vol0/mypbc.getBox().determinant());
-  //   if (enableLog) {
-  //     log << "Scaling atom distances by  " << Fvol << " \n";
-  //   }
-  // } else {
-  //   if (enableLog) {
-  //     log << "Using unscaled atom distances \n";
-  //   }
-  // }
 
   r00.resize(N_Blocks);
   sw.resize(N_Blocks);
@@ -744,7 +653,7 @@ PINES::PINES(const ActionOptions&ao):
     sfs.resize(N_Blocks);
     std::string errors;
     for (unsigned n=0; n<N_Blocks; n++) {
-      sfs[jn.set(sw[n],errors);
+      sfs[n].set(sw[n],errors);
       std::string num;
       Tools::convert(n+1, num);
       if( errors.length()!=0 ) error("problem reading SWITCH" + num + " keyword : " + errors );
@@ -770,7 +679,7 @@ PINES::PINES(const ActionOptions&ao):
   // The if/else statement accounts for there being >1 elements in the solute-solvent blocks, 
   // and expects that the interaction with solvent is the last block of the each solute atom's interactions
   // Total count keeps a running tally of the elements in the entire PINES so that there will be an equal number of components.
-  unsigned total_count=0;
+  int total_count=0
   for(int n=0; n<N_Blocks; n++){
     for(i=0; i<block_lengths[n]; i++){
       string comp = "ELEMENT-" + to_string(total_count);
@@ -783,12 +692,12 @@ PINES::PINES(const ActionOptions&ao):
   using AtomPair = std::pair<AtomNumber, AtomNumber>;
   using DistAtomPair = std::pair<double, AtomPair>;
   using MaxHeap = std::priority_queue<DistAtomPair, std::vector<DistAtomPair>, CompareDist>;
-//  using MaxHeapVector = std::vector<MaxHeap>;
+  using MaxHeapVector = std::vector<MaxHeap>;
 
   std::set<AtomNumber> uniqueIndices;
 
   for(n=0; n<N_Blocks; n++){
-    MaxHeap tempHeap = maxHeap[n];
+    MaxHeap tempHeap = maxHeapVec[n];
     while(!tempHeap.empty()){
       DistAtomPair topElement = tempHeap.top();
       tempHeap.pop();
@@ -830,294 +739,94 @@ PINES::PINES(const ActionOptions&ao):
 // PINES::~PINES()
 // {
 //   for (unsigned j=0; j<N_Blocks; j++) {
-//     delete maxHeap[j];
+//     delete maxHeapVec[j];
 //   }
 // }
 
 
 // SD request atoms in every frame.
 void PINES::prepare() {
-  if(nlall->getStride()>0) {
-    if((getStep()+1)%nlall->getStride()==0) {
-      requestAtoms(listall);
+  // This should be changed from a (fixed) global perspective for frames
+  // To a (dynamic) local perspective where the condition is triggered only nstride since
+  // The last update
+  // std::vector<std::pair<AtomNumber, AtomNumber> > pairlist(N_Blocks);
+  if(getStep()!=0){
+    int total_count=0;
+    for(int n=0; n<N_Blocks; n++){
+      total_count += block_lengths[n];
+    }
 
-      if(cross){
-        ann_deriv.resize(listall.size());
-      }
-      if (direct){
-	      ann_deriv.resize(listall.size()*(listall.size()-1)*0.5);
-      }
+    if(steps_since_update==0) {
 
-      int total_count=0;
-      // Adjust total_count based on the solvent atoms considered.
-      // Total_count should be the total number of elements in the
-      // PINES block.
-
-      if (solv_blocks == 3) {
-        for(unsigned j=0; j<Natm-2; j++) {
-          total_count += j;
-        }
-        total_count += NL_const_size*(Natm-2)*3;
-      } else if (solv_blocks == 2) {
-        for(unsigned j=0; j<Natm-1; j++) {
-          total_count += j;
-        }
-        total_count += NL_const_size*(Natm-1)*2;
-      } else if (solv_blocks == 1) {
-        for(unsigned j=0; j<Natm-1; j++) {
-          total_count += j;
-        }
-        total_count += NL_const_size*(Natm-1);
-      } else {
-        for(unsigned j=0; j<Natm; j++) {
-          total_count += j;
-        }
-      }
-
-      if(direct){
-	      total_count = 78;
-      }
-
-      for(unsigned i=0; i < ann_deriv.size(); i++) {
-        ann_deriv[i].resize(total_count);
-      }
-      ds_array.resize(total_count);
-    } else if((getStep()%nlall->getStride()==0) && (getStep()!=0)) {
-      
-      std::vector<vector<AtomNumber>> snn_list;
-      std::vector<vector<AtomNumber>> Hydrogen_nn_list;
-      std::vector<double> snn_mags;
-      std::vector<AtomNumber> all_ids;
-      std::vector<double> all_mags;
-      std::vector<AtomNumber> total_waterOx_list;
-      std::vector<AtomNumber> total_waterHydrogen_list;
-
-      int buffer=10;
-      int Nlist_count;
-      snn_list.clear();
-      Hydrogen_nn_list.clear();
-      total_waterOx_list.clear();
-      total_waterHydrogen_list.clear();
-
-      if (solv_blocks == 3) {
-        Hydrogen_nn_list.resize(Natm-2);
-        snn_list.resize(Natm-2);
-      } else {
-        Hydrogen_nn_list.resize(Natm-1);
-        snn_list.resize(Natm-1);
-      }
-
-      Vector ddist;
-      double smallest_val;
-      Nlist_count=0;
-
-      Nlist_count=0;
-      for(unsigned j=0; j<Natm; j++) {
-        for(unsigned i=j+1; i<Natm; i++) {
-          if( (atype[i] == "OW") || ((solv_blocks == 2) && (atype[i] == "HW1")) ) {
-            all_mags.clear();
-            all_ids.clear();
-
-            for(unsigned k=0; k<nl[Nlist_count]->size(); k++) {
-              unsigned id0=(nl[Nlist_count]->getClosePairAtomNumber(k).first).index();
-              unsigned id1=(nl[Nlist_count]->getClosePairAtomNumber(k).second).index();
-              Vector Pos0,Pos1;
-              double mag;
-              
-              Pos0=getPosition(id0);
-              Pos1=getPosition(id1);
-
-              ddist=pbcDistance(Pos0,Pos1);
-              mag=ddist.modulo();
-
-              all_mags.push_back(mag);
-              all_ids.push_back(listall[id0]);
+      // delete maxHeapVec; // ???
+      using AtomPair = std::pair<AtomNumber, AtomNumber>;
+      using DistAtomPair = std::pair<double, AtomPair>;
+      using MaxHeap = std::priority_queue<DistAtomPair, std::vector<DistAtomPair>, CompareDist>;
+      using MaxHeapVector = std::vector<MaxHeap>;
+      MaxHeapVector maxHeapVec;
+      for(int n=0; n<N_Blocks; n++){
+        int tot_num_pairs = block_lengths[n] + Buffer_Pairs[n];
+        for(int i=0; i<block_groups_atom_list[n][0].size(); i++){
+          Vector Pos0,Pos1;
+          AtomNumber ind0=block_groups_atom_list[n][0][i];
+          Pos0=getPosition(ind0);
+          for(int j=0; j<block_groups_atom_list[n][1].size(); j++){
+            AtomNumber ind1=block_groups_atom_list[n][1][j];
+            AtomPair test_pair={ind0,ind1};
+            if(Exclude_Pairs[n].find(test_pair) != Exclude_Pairs[n].end()){
+              continue;
             }
-            for(unsigned x=0; x<NL_const_size+10; x++) {
-              smallest_val = all_mags[0];
-              int nl_pos = 0;
-              for(unsigned y=0; y<all_mags.size(); y++) {
-                if(smallest_val > all_mags[y]) {
-                  smallest_val = all_mags[y];
-                  nl_pos = y;
-                }
-              }
-
-              snn_mags.push_back(smallest_val);
-              snn_list[j].push_back(all_ids[nl_pos]);
-
-              unsigned atom_indx = listall.size();
-              if (solv_blocks > 1) {
-                for(unsigned k=0; k<listall.size(); k++) {
-                  if (listall[k] == all_ids[nl_pos]) {
-                    atom_indx = k;
-                  }
-                }
-                for(unsigned k=0; k<listall.size(); k++) {
-                  if (AtomToResID_Dict[atom_indx] == AtomToResID_Dict[k]) {
-                    if( (solv_blocks == 3) && (atom_indx != k) ){
-                      Hydrogen_nn_list[j].push_back(listall[k]);
-                    } else if ( (solv_blocks == 2) ) {
-                      Hydrogen_nn_list[j].push_back(listall[k]);
-                    }
-                  }
-                }
-              }
-
-
-              all_mags[nl_pos] = 99999.;
-              if(total_waterOx_list.empty()) {
-                total_waterOx_list.push_back(all_ids[nl_pos]);
-              } else {
-                bool id_present=false;
-                for(unsigned y=0; y<total_waterOx_list.size(); y++) {
-                  if(all_ids[nl_pos] == total_waterOx_list[y]) {
-                    id_present=true;
-                  }
-                }
-                if(!id_present) {
-                  total_waterOx_list.push_back(all_ids[nl_pos]);
-                }
-              }
-              if (solv_blocks > 1) {
-                if (std::find(total_waterHydrogen_list.begin(), total_waterHydrogen_list.end(), Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-2]) == total_waterHydrogen_list.end()) {
-                  total_waterHydrogen_list.push_back(Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-2]);
-                }
-                if (std::find(total_waterHydrogen_list.begin(), total_waterHydrogen_list.end(), Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-1]) == total_waterHydrogen_list.end()) {
-                  total_waterHydrogen_list.push_back(Hydrogen_nn_list[j][Hydrogen_nn_list[j].size()-1]);
-                }
-              }
+            Pos1=mypdb.getPosition(ind1);
+            ddist=pbcDistance(Pos0,Pos1);
+            mag=ddist.modulo();
+            if(maxHeapVec[n].size() < tot_num_pairs){
+              maxHeapVec[n].push_back({mag, {ind0,ind1}});
+            } else if (mag < maxHeapVec[n].top().first) {
+              maxHeapVec[n].pop();
+              maxHeapVec[n].push_back({mag, {ind0,ind1}});
             }
           }
-          Nlist_count += 1;
         }
       }
-      if (solv_blocks > 0) {
-        std::sort(total_waterOx_list.begin(), total_waterOx_list.end());
+
+      std::set<AtomNumber> uniqueIndices;
+
+      for(n=0; n<N_Blocks; n++){
+        MaxHeap tempHeap = maxHeapVec[n];
+        while(!tempHeap.empty()){
+          DistAtomPair topElement = tempHeap.top();
+          tempHeap.pop();
+          uniqueIndices.insert(topElement.second.first);
+          uniqueIndices.insert(topElement.second.second);
+        }
       }
       listreduced.clear();
-      listreduced = listnonwater;
+      listreduced.insert(listreduced.end(), uniqueIndices.begin(), uniqueIndices.end());
+      requestAtoms(listreduced);
 
-      if (solv_blocks == 1) {
-        for(unsigned i=0; i<total_waterOx_list.size(); i++) {
-          listreduced.push_back(total_waterOx_list[i]);
-        }
-      } else if (solv_blocks == 2) {
-        for(unsigned i=0; i<total_waterHydrogen_list.size(); i++) {
-          listreduced.push_back(total_waterHydrogen_list[i]);
-        }
-      } else if (solv_blocks == 3) {
-        for(unsigned i=0; i<total_waterOx_list.size(); i++) {
-          listreduced.push_back(total_waterOx_list[i]);
-          listreduced.push_back(total_waterHydrogen_list[i*2]);
-          listreduced.push_back(total_waterHydrogen_list[i*2+1]);
-        }
-      }
-  
-      if (solv_blocks == 3) { 
-        for(unsigned j=0; j<Natm-2; j++) {
-          for(unsigned k=0; k<NL_const_size+10; k++) {
-            for(unsigned i=0; i<listreduced.size(); i++) {
-              if(snn_list[j][k]==listreduced[i]){
-                AtomNumber atom_id;
-                snn_list[j][k]=atom_id.setIndex(i);
-              }
-              if(Hydrogen_nn_list[j][2*k]==listreduced[i]){
-                AtomNumber atom_id;
-                Hydrogen_nn_list[j][2*k]=atom_id.setIndex(i);
-              }
-              if(Hydrogen_nn_list[j][2*k+1]==listreduced[i]){
-                AtomNumber atom_id;
-                Hydrogen_nn_list[j][2*k+1]=atom_id.setIndex(i);
-              }
-            }
-          }
-        }
-      } else {
-        for(unsigned j=0; j<Natm-1; j++) {
-          for(unsigned k=0; k<NL_const_size+10; k++) {
-            for(unsigned i=0; i<listreduced.size(); i++) {
-              if (solv_blocks == 1) {
-                if(snn_list[j][k]==listreduced[i]){
-                  AtomNumber atom_id;
-                  snn_list[j][k]=atom_id.setIndex(i);
-                }
-              }
-              if (solv_blocks == 2) {
-                if(Hydrogen_nn_list[j][2*k]==listreduced[i]){
-                  AtomNumber atom_id;
-                  Hydrogen_nn_list[j][2*k]=atom_id.setIndex(i);
-                }
-                if(Hydrogen_nn_list[j][2*k+1]==listreduced[i]){
-                  AtomNumber atom_id;
-                  Hydrogen_nn_list[j][2*k+1]=atom_id.setIndex(i);
-                }
-              }
-            }
-          }
-        }
-      }
-      unsigned count_nl_loop=0;
-      for(unsigned j=0; j<Natm-1; j++) {
-        for(unsigned i=j+1; i<Natm; i++) {
-          if (count_nl_loop < Nlist) {
-            // Only update solvent blocks (included IDs are dynamic)
-            if(atype[i] == "OW") {
-              delete nl_small[count_nl_loop];
-              nl_small[count_nl_loop] = new NeighborList(snn_list[j],Plist[j],true,false,pbc,getPbc(),comm,nl_cut[count_nl_loop],nl_st[count_nl_loop]);
-            } else if (atype[i] == "HW1") {
-              delete nl_small[count_nl_loop];
-              nl_small[count_nl_loop] = new NeighborList(Hydrogen_nn_list[j],Plist[j],true,false,pbc,getPbc(),comm,nl_cut[count_nl_loop],nl_st[count_nl_loop]);
-            }
-          }
-          count_nl_loop += 1;
-        }
+      ann_deriv.resize(listreduced.size());
+
+    // printf("TOTAL COUNT :%d\n\n\n", total_count);
+      for (int i = 0; i < ann_deriv.size(); i++) {
+        ann_deriv[i].resize(total_count);
       }
 
-      
-      delete nlreduced;
-      nlreduced= new NeighborList(listreduced,true,pbc,getPbc(),comm,nl_cut[0],nl_st[0]);
+      ds_array.resize(total_count);
+      steps_since_update += 1;
+    } else if(steps_since_update>=nstride) {
+      requestAtoms(listall);
 
-      requestAtoms(nlreduced->getFullAtomList());
-      if(cross){
-        ann_deriv.resize(listreduced.size());
-      }
-      if(direct){
-	      ann_deriv.resize(listreduced.size()*(listreduced.size()-1)*0.5);
-      }
-     // printf("ANN size %d",ann_deriv.size());
-      int total_count=0;
+      ann_deriv.resize(listall.size());
 
-      if(cross){
-        if (solv_blocks == 3) {
-          for(unsigned j=0; j<Natm-2; j++) {
-            total_count += j;
-          }
-          total_count += NL_const_size*(Natm-2)*3;
-        } else if (solv_blocks == 2) {
-          for(unsigned j=0; j<Natm-1; j++) {
-            total_count += j;
-          }
-          total_count += NL_const_size*(Natm-1)*2;
-        } else if (solv_blocks == 1) {
-          for(unsigned j=0; j<Natm-1; j++) {
-            total_count += j;
-          }
-          total_count += NL_const_size*(Natm-1);
-        } else {
-          for(unsigned j=0; j<Natm; j++) {
-            total_count += j;
-          }
-        }
+      int total_count=0
+      for(int n=0; n<N_Blocks; n++){
+        total_count += block_lengths[n];
       }
-      if(direct){
-        total_count = 78;
-      }
-
       for(unsigned i=0; i < ann_deriv.size(); i++) {
         ann_deriv[i].resize(total_count);
       }
       ds_array.resize(total_count);
+      steps_since_update = 0;
     }
   }
 }
@@ -1129,15 +838,17 @@ void PINES::calculate()
   // The following are probably needed as static arrays
   static int prev_stp=-1;
   static int init_stp=1;
-  static std:: vector<std:: vector<Vector> > prev_pos(Nlist);
-  static std:: vector<std:: vector<double> > cPINES(Nlist);
-  static std:: vector<std:: vector<int> > Atom0(Nlist);
-  static std:: vector<std:: vector<int> > Atom1(Nlist);
+  static std:: vector<std:: vector<Vector> > prev_pos(N_Blocks);
+  static std:: vector<std:: vector<double> > cPINES(N_Blocks);
+  static std:: vector<std:: vector<int> > Atom0(N_Blocks);
+  static std:: vector<std:: vector<int> > Atom1(N_Blocks);
   std:: vector<std:: vector<int> > A0(Nprec);
   std:: vector<std:: vector<int> > A1(Nprec);
+  //std:: vector<std::pair<double, std::pair<AtomNumber, AtomNumber> > > sortedHeapDict(N_Blocks);
   size_t stride=1;
   unsigned rank=0;
 
+  // Serial vs parallelization?
   if(!serial) {
     stride=comm.Get_size();
     rank=comm.Get_rank();
@@ -1146,336 +857,108 @@ void PINES::calculate()
     rank=0;
   }
 
-  // Transform (and sort) the rPINES before starting the dynamics
-  if (((prev_stp==-1) || (init_stp==1)) &&!CompDer) {
-    if(prev_stp!=-1) {init_stp=0;}
-    // Calculate the volume scaling factor
-    if(Svol) {
-      Fvol=cbrt(Vol0/getBox().determinant());
-    }
-    //Set switching function parameters
-    if (enableLog) {
-      log << "\n";
-      log << "REFERENCE PDB # " << prev_stp+2 << " \n";
-    }
-    // Set switching function parameters here only if computing derivatives
-    //   now set at the beginning of the dynamics to solve the r0 issue
-    if (enableLog) {
-      log << "Switching Function Parameters \n";
-    }
-    sfs.resize(Nlist);
-    std::string errors;
-    for (unsigned j=0; j<Nlist; j++) {
-      if(Svol) {
-        double r0;
-        vector<string> data=Tools::getWords(sw[j]);
-        data.erase(data.begin());
-        Tools::parse(data,"R_0",r0);
-        std::string old_r0; Tools::convert(r0,old_r0);
-        r0*=Fvol;
-        std::string new_r0; Tools::convert(r0,new_r0);
-        std::size_t pos = sw[j].find("R_0");
-        sw[j].replace(pos+4,old_r0.size(),new_r0);
-      }
-      sfs[j].set(sw[j],errors);
-      std::string num;
-      Tools::convert(j+1, num);
-      if( errors.length()!=0 ) error("problem reading SWITCH" + num + " keyword : " + errors );
-      r00[j]=sfs[j].get_r0();
-      if (enableLog) {
-        log << "  Swf: " << j << "  r0=" << (sfs[j].description()).c_str() << " \n";
-      }
-    }
-  }
-  // Do the sorting only once per timestep to avoid building the PINES N times for N rPINES PDB structures!
-  if ((getStep()>prev_stp&&getStep()%updatePINES==0)||CompDer) {
-    if (enableLog) {
-      if (CompDer) log << " Step " << getStep() << "  Computing Derivatives NON-SORTED PINES \n";
-    }
+//Tolerance check and update
+    // Do the sorting only once per timestep to avoid building the PINES N times for N rPINES PDB structures!
     //
     // build COMs from positions if requested
     // update neighbor lists when an atom moves out of the Neighbor list skin
-    if (doneigh && ((getStep()+1)%nlall->getStride()==0)) {
-      bool doupdate=false;
-      // For the first step build previous positions = actual positions
-      if (prev_stp==-1) {
-        for (unsigned j=0; j<Nlist; j++) {
-          for (unsigned i=0; i<nl[j]->getFullAtomList().size(); i++) {
-            Vector Pos;
+  if (doneigh && ((getStep()+1)%nlall->getStride()==0)) {
+    bool doupdate=false;
+    // For the first step build previous positions = actual positions
+    if (prev_stp==-1) {
+      for (unsigned j=0; j<Nlist; j++) {
+        for (unsigned i=0; i<nl[j]->getFullAtomList().size(); i++) {
+          Vector Pos;
 
-            Pos=getPosition(nl[j]->getFullAtomList()[i].index());
+          Pos=getPosition(nl[j]->getFullAtomList()[i].index());
 
-            prev_pos[j].push_back(Pos);
-          }
-        }
-        doupdate=true;
-      }
-      // Decide whether to update lists based on atom displacement, every stride
-      std:: vector<std:: vector<Vector> > tmp_pos(Nlist);
-      if (getStep() % nlall->getStride() ==0) {
-        for (unsigned j=0; j<Nlist; j++) {
-          for (unsigned i=0; i<nl[j]->getFullAtomList().size(); i++) {
-            Vector Pos;
-
-            Pos=getPosition(nl[j]->getFullAtomList()[i].index());
-
-            tmp_pos[j].push_back(Pos);
-            if (pbcDistance(tmp_pos[j][i],prev_pos[j][i]).modulo()>=nl_skin[j]) {
-              doupdate=true;
-            }
-          }
+          prev_pos[j].push_back(Pos);
         }
       }
-      // Update Nlists if needed
-      if (doupdate==true) {
-        for (unsigned j=0; j<Nlist; j++) {
-          for (unsigned i=0; i<nl[j]->getFullAtomList().size(); i++) {
-            prev_pos[j][i]=tmp_pos[j][i];
-          }
-          nl[j]->update(prev_pos[j]);
-          if (enableLog) {
-            log << " Step " << getStep() << "  Neighbour lists updated " << nl[j]->size() << " \n";
+      doupdate=true;
+    }
+    // Decide whether to update lists based on atom displacement, every stride
+    std:: vector<std:: vector<Vector> > tmp_pos(Nlist);
+    if (getStep() % nlall->getStride() ==0) {
+      for (unsigned j=0; j<Nlist; j++) {
+        for (unsigned i=0; i<nl[j]->getFullAtomList().size(); i++) {
+          Vector Pos;
+
+          Pos=getPosition(nl[j]->getFullAtomList()[i].index());
+
+          tmp_pos[j].push_back(Pos);
+          if (pbcDistance(tmp_pos[j][i],prev_pos[j][i]).modulo()>=nl_skin[j]) {
+            doupdate=true;
           }
         }
       }
     }
-    // Calculate the volume scaling factor
-    if(Svol) {
-      Fvol=cbrt(Vol0/getBox().determinant());
-    }
-    Vector ddist;
-    // Global to local variables
-    bool doserial=serial;
-
-    // Build "Nlist" PINES blocks
-    for(unsigned j=0; j<Nlist; j++) {
-      if(dosort[j]) {
-        // from global to local variables to speedup the for loop with if statements
-        bool dopbc=pbc;
-        // Vectors collecting occupancies: OrdVec one rank, OrdVecAll all ranks
-        std:: vector<int> OrdVec(Nprec,0);
-        cPINES[j].resize(0);
-        Atom0[j].resize(0);
-        Atom1[j].resize(0);
-        // Building distances for the PINES vector at time t
-        if(timer) stopwatch.start("1 Build cPINES");
-        if((getStep()+1)%nlall->getStride()==0) {
-          for(unsigned i=rank; i<nl[j]->size(); i+=stride) {
-            unsigned i0=(nl[j]->getClosePairAtomNumber(i).first).index();
-            unsigned i1=(nl[j]->getClosePairAtomNumber(i).second).index();\
-            Vector Pos0,Pos1;
-
-            Pos0=getPosition(i0);
-            Pos1=getPosition(i1);
-
-            if(dopbc) {
-              ddist=pbcDistance(Pos0,Pos1);
-            } else {
-              ddist=delta(Pos0,Pos1);
-            }
-            double df=0.;
-            //Integer sorting ... faster!
-            //Transforming distances with the Switching function + real to integer transformation
-            int Vint=int(sfs[j].calculate(ddist.modulo()*Fvol, df)*double(Nprec-1)+0.5);
-            // Enables low precision with standard PINES sizes.
-            if(cart2PINES) {
-              if(Vint == 0) {
-                Vint = 1;
-              }
-            }
-
-            //Integer transformed distance values as index of the Ordering Vector OrdVec
-            OrdVec[Vint]+=1;
-            //Keeps track of atom indices for force and virial calculations
-            A0[Vint].push_back(i0);
-            A1[Vint].push_back(i1);
-          }
-          int sb_count=0;
-          int discards=0;
-          // Account for twice as many hydrogen as oxygen
-          unsigned max_solv_atoms = NL_const_size;
-          if (std::find(NList_HW_blocks.begin(), NList_HW_blocks.end(), j) != NList_HW_blocks.end()) {
-            max_solv_atoms = 2*NL_const_size;
-          }
-
-          if(nl[j]->size() >= max_solv_atoms) {
-            // Limit solvent blocks to NL_constant_size
-            for(unsigned i=Nprec-1; i<0; i--) {
-              if(OrdVec[i] != 0) {
-                sb_count += OrdVec[i];
-              }
-              if(sb_count > max_solv_atoms) {
-                OrdVec[i] = 0;
-                if(sb_count - A0[i].size() < max_solv_atoms) {
-                  discards = sb_count - max_solv_atoms;
-                  A0[i].resize(A0[i].size()-discards);
-                  A1[i].resize(A1[i].size()-discards);
-                } else {
-                  A0[i].resize(1,0);
-                  A1[i].resize(1,0);
-                }
-              }
-            }
-          }
-        } else {
-          for(unsigned i=rank; i<nl_small[j]->size(); i+=stride) {
-            unsigned i0=(nl_small[j]->getClosePairAtomNumber(i).first).index();
-            unsigned i1=(nl_small[j]->getClosePairAtomNumber(i).second).index();
-            Vector Pos0,Pos1;
-
-            Pos0=getPosition(i0);
-            Pos1=getPosition(i1);
-
-            if(dopbc) {
-              ddist=pbcDistance(Pos0,Pos1);
-            } else {
-              ddist=delta(Pos0,Pos1);
-            }
-            double df=0.;
-            //Integer sorting ... faster!
-            //Transforming distances with the Switching function + real to integer transformation
-            int Vint=int(sfs[j].calculate(ddist.modulo()*Fvol, df)*double(Nprec-1)+0.5);
-            // Enables low precision with standard PINES sizes.
-            if(cart2PINES) {
-              if(Vint == 0) {
-                Vint = 1;
-              }
-            }
-
-            //Integer transformed distance values as index of the Ordering Vector OrdVec
-            OrdVec[Vint]+=1;
-            //Keeps track of atom indices for force and virial calculations
-            A0[Vint].push_back(i0);
-            A1[Vint].push_back(i1);
-          }
-          int sb_count=0;
-          int discards=0;
-
-          int max_solv_atoms = NL_const_size;
-          if (std::find(NList_HW_blocks.begin(), NList_HW_blocks.end(), j) != NList_HW_blocks.end()) {
-            max_solv_atoms = 2*NL_const_size;
-          }
-
-          if(nl_small[j]->size() >= max_solv_atoms) {
-            // Limit solvent blocks to NL_constant_size
-            for(unsigned i=Nprec-1; i<0; i--) {
-              if(OrdVec[i] != 0) {
-                sb_count += OrdVec[i];
-              }
-              if(sb_count > max_solv_atoms) {
-                OrdVec[i] = 0;
-                if(sb_count - A0[i].size() < max_solv_atoms) {
-                  discards = sb_count - max_solv_atoms;
-                  A0[i].resize(A0[i].size()-discards);
-                  A1[i].resize(A1[i].size()-discards);
-                } else {
-                  A0[i].resize(1,0);
-                  A1[i].resize(1,0);
-                }
-              }
-            }
-          }
+    // Update Nlists if needed
+    if (doupdate==true) {
+      for (unsigned j=0; j<Nlist; j++) {
+        for (unsigned i=0; i<nl[j]->getFullAtomList().size(); i++) {
+          prev_pos[j][i]=tmp_pos[j][i];
         }
-        if(timer) stopwatch.stop("1 Build cPINES");
-        if(timer) stopwatch.start("2 Sort cPINES");
-        if(!doserial && comm.initialized()) {
-          // Vectors keeping track of the dimension and the starting-position of the rank-specific pair vector in the big pair vector.
-          std:: vector<int> Vdim(stride,0);
-          std:: vector<int> Vpos(stride,0);
-          // Vectors collecting occupancies: OrdVec one rank, OrdVecAll all ranks
-          std:: vector<int> OrdVecAll(stride*Nprec);
-          // Big vectors containing all Atom indexes for every occupancy (Atom0O(Nprec,n) and Atom1O(Nprec,n) matrices in one vector)
-          std:: vector<int> Atom0F;
-          std:: vector<int> Atom1F;
-          // Vector used to reconstruct arrays
-          std:: vector<unsigned> k(stride,0);
-          // Zeros might be many, this slows down a lot due to MPI communication
-          // Avoid passing the zeros (i=1) for atom indices
-          for(unsigned i=1; i<Nprec; i++) {
-            // Building long vectors with all atom indexes for occupancies ordered from i=1 to i=Nprec-1
-            // Can this be avoided ???
-            Atom0F.insert(Atom0F.end(),A0[i].begin(),A0[i].end());
-            Atom1F.insert(Atom1F.end(),A1[i].begin(),A1[i].end());
-            A0[i].resize(0);
-            A1[i].resize(0);
-          }
-          // Resize partial arrays to fill up for the next PINES block
-          A0[0].resize(0);
-          A1[0].resize(0);
-          A0[Nprec-1].resize(0);
-          A1[Nprec-1].resize(0);
-          // Avoid passing the zeros (i=1) for atom indices
-          OrdVec[0]=0;
-          OrdVec[Nprec-1]=0;
-
-          // Wait for all ranks before communication of Vectors
-          comm.Barrier();
-
-          // pass the array sizes before passing the arrays
-          int dim=Atom0F.size();
-          // Vdim and Vpos keep track of the dimension and the starting-position of the rank-specific pair vector in the big pair vector.
-          comm.Allgather(&dim,1,&Vdim[0],1);
-
-          // TO BE IMPROVED: the following may be done by the rank 0 (now every rank does it)
-          int Fdim=0;
-          for(unsigned i=1; i<stride; i++) {
-            Vpos[i]=Vpos[i-1]+Vdim[i-1];
-            Fdim+=Vdim[i];
-          }
-          Fdim+=Vdim[0];
-          // build big vectors for atom pairs on all ranks for all ranks
-          std:: vector<int> Atom0FAll(Fdim);
-          std:: vector<int> Atom1FAll(Fdim);
-          // TO BE IMPROVED: Allgathers may be substituted by gathers by proc 0
-          //   Moreover vectors are gathered head-to-tail and assembled later-on in a serial step.
-          // Gather the full Ordering Vector (occupancies). This is what we need to build the PINES
-          comm.Allgather(&OrdVec[0],Nprec,&OrdVecAll[0],Nprec);
-          // Gather the vectors of atom pairs to keep track of the idexes for the forces
-          comm.Allgatherv(&Atom0F[0],Atom0F.size(),&Atom0FAll[0],&Vdim[0],&Vpos[0]);
-          comm.Allgatherv(&Atom1F[0],Atom1F.size(),&Atom1FAll[0],&Vdim[0],&Vpos[0]);
-
-          // Reconstruct the full vectors from collections of Allgathered parts (this is a serial step)
-          // This is the tricky serial step, to assemble together PINES and atom-pair info from head-tail big vectors
-          // Loop before on l and then on i would be better but the allgather should be modified
-          // Loop on blocks
-          // Loop on Ordering Vector size excluding zeros (i=1)
-          if(timer) stopwatch.stop("2 Sort cPINES");
-          if(timer) stopwatch.start("3 Reconstruct cPINES");
-          for(unsigned i=1; i<Nprec; i++) {
-            // Loop on the ranks
-            for(unsigned l=0; l<stride; l++) {
-              // Loop on the number of head-to-tail pieces
-              for(unsigned m=0; m<OrdVecAll[i+l*Nprec]; m++) {
-                // cPINES is the current PINES at time t
-                cPINES[j].push_back(double(i)/double(Nprec-1));
-                Atom0[j].push_back(Atom0FAll[k[l]+Vpos[l]]);
-                Atom1[j].push_back(Atom1FAll[k[l]+Vpos[l]]);
-                k[l]+=1;
-              }
-            }
-          }
-          if(timer) stopwatch.stop("3 Reconstruct cPINES");
-        } else {
-          for(unsigned i=1; i<Nprec; i++) {
-            for(unsigned m=0; m<OrdVec[i]; m++) {
-              cPINES[j].push_back(double(i)/double(Nprec-1));
-              Atom0[j].push_back(A0[i][m]);
-              Atom1[j].push_back(A1[i][m]);
-            }
-          }
+        nl[j]->update(prev_pos[j]);
+        if (enableLog) {
+          log << " Step " << getStep() << "  Neighbour lists updated " << nl[j]->size() << " \n";
         }
       }
     }
   }
+  Vector ddist;
+
+  // Build "Nlist" PINES blocks
+  for(unsigned n=0; n<N_Blocks; n++) {
+    if(maxHeapVec[n].size()!= 0) {
+      int total_num_pairs = block_lengths[n] + Buffer_Pairs[n];
+      for(int i=0; i<total_num_pairs; i++) {
+        if(i>=Buffer_Pairs[n]){
+          int block_ind = total_num_pairs - 1 - i;
+          cPINES[n][block_ind] = maxHeapVec[n].top().first;
+          pairlist[n][block_ind] = maxHeapVec[n].top().second;
+        }
+        //sortedHeapDict[n].push_back(maxHeapVec[n]);
+        maxHeapVec[n].pop();
+      }
+    } else {
+
+      
+      // Rebuild MaxHeapVec by calculatin dist from pairlist inds
+      using AtomPair = std::pair<AtomNumber, AtomNumber>;
+      using DistAtomPair = std::pair<double, AtomPair>;
+      using MaxHeap = std::priority_queue<DistAtomPair, std::vector<DistAtomPair>, CompareDist>;
+      using MaxHeapVector = std::vector<MaxHeap>;
+      MaxHeapVector maxHeapVec;
+
+      int tot_num_pairs = block_lengths[n] + Buffer_Pairs[n];
+      for(int i=0; i<tot_num_pairs; i++){
+        Vector Pos0,Pos1;
+        ind0=pairlist[n][i].first;
+        ind1=pairlist[n][i].second;
+        Pos0=getPosition(ind0);
+        Pos1=getPosition(ind1);
+        ddist=pbcDistance(Pos0,Pos1);
+        mag=ddist.modulo();
+        maxHeapVec[n].push_back({mag, {ind0,ind1}});
+        //Need to calculate cPINES now?
+      }
+      for(int i=0; i<tot_num_pairs; i++){
+        int block_ind = tot_num_pairs - 1 - i;
+        if(i>=Buffer_Pairs[n]){
+          cPINES[n][block_ind] = maxHeapVec[n].top().first;
+          pairlist[n][block_ind] = maxHeapVec[n].top().second;
+          maxHeapVec[n].pop();
+        }
+      }
+      
+    }
+  }
+
   Vector distance;
   double dfunc=0.;
-  // Calculate volume scaling factor
-  if(Svol) {
-    Fvol=cbrt(Vol0/getBox().determinant());
-  }
 
-
-                                                    
+ // Create/open PV value files                                              
   FILE *PINES_rep_file = NULL;
   if (writestride) {
     if (getStep() % writePINESstride == 0) {                                                                                      
@@ -1483,70 +966,119 @@ void PINES::calculate()
       PINES_rep_file = fopen(PINES_rep_fileName.c_str(), "w+"); 
     }
   }
-  
   FILE *PINES_rep_file_traj = NULL;
   if (writePINEStraj) {
     string PINES_rep_fileName_traj = "PINES_representation_traj.dat";
     PINES_rep_file_traj = fopen(PINES_rep_fileName_traj.c_str(), "a");
   }
+  
+// Build ann_deriv
+  for(unsigned j=0; j<ann_deriv.size(); j++) {
+    for(unsigned i=0; i<ann_deriv[j].size(); i++) {
+      for(unsigned k=0; k<3; k++) {ann_deriv[j][i][k]=0.;}
+    }
+  }
+  for(unsigned j=0; j<3; j++) {
+    for(unsigned k=0; k<3; k++) {
+      m_virial[j][k]=0.;
+    }
+  }
+  for(unsigned n=0; n<N_Blocks; n++) {
+    for(unsigned i=0; i<block_lengths[n]; i++) {
+      PIV[n][i]=0.;
+    }
+  }
+  // resize vectors to the appropriate sizes and set starting values to zero --NH
+  //PINES_Pair0.resize(ds_array.size());
+  //PINES_Pair1.resize(ds_array.size());
+  unsigned PINES_element=0;
+  for(unsigned n=0; n<N_Blocks; n++) {
+    for(unsigned i=0; i<block_lengths[n]; i++) {
+      unsigned i0=0;
+      unsigned i1=0;
+      // // Atom0 and Atom1 are lists that index atoms for PINES elements
+      i0=pairlist[n][i].first;
+      // // Record the atom IDs for the PINES elements of interest --NH
+      // PINES_Pair0[PINES_element] = i0;
+      i1=pairlist[n][i].second;
+      // PINES_Pair1[PINES_element] = i1;
+      // Pos0 and Pos1 are 1x3 vectors that hold the xyz coordinates of the indexed atoms
+      Vector Pos0,Pos1;
+      Pos0=getPosition(i0);
+      Pos1=getPosition(i1);
+      // // distance is also a 1x3 vector of the xyz distances between the two atoms after consideration of the pbc
+      distance=pbcDistance(Pos0,Pos1);
+      dfunc=0.;
+      // dm is a scalar value that is the magnitude of the distance between the atoms
+      double dm=distance.modulo();
+      // sfs[j] is the parameters for the switching function, which can be chosen to be different for different blocks
+      // In this case, all blocks use the same switching function so all sfs[j] are the same function.
+      // Used with .calculate(dm*Fvol, dfunc), the PINES element value is returned and the derivative stored in dfunc
+      PIV[n][i] = sfs[n].calculate(cPINES[n][i]*Fvol, dfunc);
 
-  // SD countLoopLimit for debugging.
-  int countLoopLimit = 0;
-  for(unsigned j=0; j<Nlist; j++) {
-    bool dosorting=dosort[j];
-    unsigned limit=0;
-    // Set limit to size of PINES block. Solute-solute blocks will be 1 (for tetracosane) 
-    // and much larger for solute-solvent blocks (likely hundreds)
-    limit = cPINES[j].size();
-    // Allow for non-constant block sizes if desired
-    if(NL_const_size > 0) {
-      // Solute-solvent blocks have more neighbors than necessary so that padding is not necessary.
-      // The solute-solvent blocks are already sorted so the last elements of the block (size NL_const_size) are the desired interactions to include
-      // i.e. the closest solute-solvent interactions. This is irrelevant for the solute-solute interactions. 
-      unsigned start_val=0;
-      // This sets the start value to be NL_const_size away from the end of the sorted block to choose the desired interactions.
+      double ds_element=0.;
+      // Create the ds_array one element at a time --NH
+      ds_element = scaling[n]*Fvol*Fvol*dfunc*cPINES[n][i];
+      ds_array[PINES_element] = ds_element;
+      // Create 1x3 vector of (dr/dx,dr/dy,dr/dz) --NH
+      Vector dr_dcoord = distance/dm;
       
-      int max_solv_atoms = NL_const_size;
-      if (std::find(NList_HW_blocks.begin(), NList_HW_blocks.end(), j) != NList_HW_blocks.end()) {
-        max_solv_atoms = 2*NL_const_size;
-      }
+      // the xyz components of the distance between atoms is scaled by tmp and added or subtracted to reflect
+      // that distance is calculated as Pos1 - Pos0
+      // Calculate ann_deriv values for the current PINES element in the loop --NH
+      ann_deriv[i0][PINES_element] = -ds_element*dr_dcoord;
+      ann_deriv[i1][PINES_element] =  ds_element*dr_dcoord;
 
-      if (cross){
-        if(limit > max_solv_atoms) {
-          start_val = limit - max_solv_atoms;
+      // This m_virial is likely not correct but has been included in case it is necessary to test the code --NH
+      m_virial    -= ds_element*Tensor(distance,distance); // Question
+      PINES_element += 1;
+
+    }
+  }
+  if (!serial && comm.initialized() ) {
+    int count = 0;
+    for(unsigned j=0; j<N_Blocks; j++) {
+        for(unsigned i=0; i<cPINES[j].size(); i++) {
+            count += 1;
         }
+    }
+    
+    comm.Barrier();
+    // SD -- This probably works because cPINES[j] size is variable for each j.
+    for (unsigned j=0; j< N_Blocks; j++) {
+      for (unsigned k=0; k<cPINES[j].size(); k++) {
+        comm.Sum(cPINES[j][k]);
+        cPINES[j][k] /= comm.Get_size();
       }
-      if (writePINEStraj) {
-        for(unsigned i=start_val; i<limit; i++) {
-          fprintf(PINES_rep_file_traj, "%8.6f\t", cPINES[j][i]);
-        }
-      }
-      if (writestride) {
-        if ( getStep() % writePINESstride == 0) {
-          for(unsigned i=start_val; i<limit; i++) {
-            fprintf(PINES_rep_file, "%8.6f\t", cPINES[j][i]);
-            countLoopLimit += 1;
-          }
-        }
-      }
-    } else {
-      // Prints out in the same PINES block element format as TEST
-      if (writePINEStraj) {
-        for(unsigned i=0; i<limit; i++) {
-          fprintf(PINES_rep_file_traj, "%8.6f\t", cPINES[j][i]);
-        } 
-      }
-      if (writestride) {
-        if ( getStep() % writePINESstride == 0) {
-          for(unsigned i=0; i<limit; i++) {
-            fprintf(PINES_rep_file, "%8.6f\t", cPINES[j][i]);
-            countLoopLimit += 1;
+    }
+
+    // SD -- This probably works because comm.Sum cannot handle 3D vectors.
+    if(!ann_deriv.empty()) {
+      for (unsigned i=0;  i<ann_deriv.size(); i++) {
+        for (unsigned j=0; j<ann_deriv[j].size(); j++) {
+          for (unsigned k=0; k<3; k++) {
+            comm.Sum(ann_deriv[i][j][k]);
+            ann_deriv[i][j][k] /= comm.Get_size();
           }
         }
       }
     }
+    // SD -- this is probably not needed.
+    comm.Sum(&m_virial[0][0],9);
   }
+  prev_stp=getStep();
 
+// PIV calculated, write values to files
+  for(unsigned n=0; n<N_Blocks; n++) {
+    int total_num_pairs = block_lengths[n] + Buffer_Pairs[n];
+    for(int pair=total_num_pairs-1; pair<0; pair--) {
+      maxHeapVec[n].pop();
+      if(pair<block_lengths[n]){
+        // use this pair/dist in PIV block n
+        // hash the positional value of the pair in the block with its PIV value
+      }
+    }
+  }
   if (writePINEStraj) {
     fprintf(PINES_rep_file_traj, "\n#END OF FRAME\n");
     fclose(PINES_rep_file_traj);
@@ -1558,144 +1090,13 @@ void PINES::calculate()
     }
   }
 
-  if(timer) stopwatch.start("4 Build For Derivatives");
-  // non-global variables Nder and Scalevol defined to speedup if structures in cycles
-  bool Nder=CompDer;
-  bool Scalevol=Svol;
-  if(cart2PINES) {
-    for(unsigned j=0; j<ann_deriv.size(); j++) {
-      for(unsigned i=0; i<ann_deriv[j].size(); i++) {
-        for(unsigned k=0; k<3; k++) {ann_deriv[j][i][k]=0.;}
-      }
-    }
-    for(unsigned j=0; j<3; j++) {
-      for(unsigned k=0; k<3; k++) {
-        m_virial[j][k]=0.;
-      }
-    }
-    // resize vectors to the appropriate sizes and set starting values to zero --NH
 
-    PINES_Pair0.resize(ds_array.size());
-    PINES_Pair1.resize(ds_array.size());
-
-    unsigned PINES_element=0;
-    for(unsigned j=0; j<Nlist; j++) {
-      unsigned limit=0;
-      limit = cPINES[j].size();
-      unsigned start_val=0;
-
-      int max_solv_atoms = NL_const_size;
-      if (std::find(NList_HW_blocks.begin(), NList_HW_blocks.end(), j) != NList_HW_blocks.end()) {
-        max_solv_atoms = 2*NL_const_size;
-      }
-      
-      if (cross) {
-      	if(limit > max_solv_atoms) {
-          start_val = limit - max_solv_atoms;
-        }
-      }
-      for(unsigned i=start_val; i<limit; i++) {
-        unsigned i0=0;
-        unsigned i1=0;
-        // Atom0 and Atom1 are lists that index atoms for PINES elements
-        i0=Atom0[j][i];
-        // Record the atom IDs for the PINES elements of interest --NH
-        PINES_Pair0[PINES_element] = i0;
-        i1=Atom1[j][i];
-        PINES_Pair1[PINES_element] = i1;
-        // Pos0 and Pos1 are 1x3 vectors that hold the xyz coordinates of the indexed atoms
-        Vector Pos0,Pos1;
-        Pos0=getPosition(i0);
-        Pos1=getPosition(i1);
-        // distance is also a 1x3 vector of the xyz distances between the two atoms after consideration of the pbc
-        distance=pbcDistance(Pos0,Pos1);
-        dfunc=0.;
-        // dm is a scalar value that is the magnitude of the distance between the atoms
-        double dm=distance.modulo();
-        // sfs[j] is the parameters for the switching function, which can be chosen to be different for different blocks
-        // In this case, all blocks use the same switching function so all sfs[j] are the same function.
-        // Used with .calculate(dm*Fvol, dfunc), the PINES element value is returned and the derivative stored in dfunc
-        double tPINES = sfs[j].calculate(dm*Fvol, dfunc);
-
-        double ds_element=0.;
-        // Create the ds_array one element at a time --NH
-        ds_element = scaling[j]*Fvol*Fvol*dfunc*dm;
-        ds_array[PINES_element] = ds_element;
-        // Create 1x3 vector of (dr/dx,dr/dy,dr/dz) --NH
-        Vector dr_dcoord = distance/dm;
-        
-        // the xyz components of the distance between atoms is scaled by tmp and added or subtracted to reflect
-        // that distance is calculated as Pos1 - Pos0
-        // Calculate ann_deriv values for the current PINES element in the loop --NH
-        ann_deriv[i0][PINES_element] = -ds_element*dr_dcoord;
-        ann_deriv[i1][PINES_element] =  ds_element*dr_dcoord;
-
-        // This m_virial is likely not correct but has been included in case it is necessary to test the code --NH
-        m_virial    -= ds_element*Tensor(distance,distance); // Question
-        PINES_element += 1;
-
-      }
-    }
-    
-    if (!serial && comm.initialized() ) {
-      int count = 0;
-      for(unsigned j=0; j<Nlist; j++) {
-          for(unsigned i=0; i<cPINES[j].size(); i++) {
-              count += 1;
-          }
-      }
-      
-      comm.Barrier();
-      // SD -- This probably works because cPINES[j] size is variable for each j.
-      for (unsigned j=0; j< Nlist; j++) {
-        for (unsigned k=0; k<cPINES[j].size(); k++) {
-          comm.Sum(cPINES[j][k]);
-          cPINES[j][k] /= comm.Get_size();
-        }
-      }
-
-      // SD -- This probably works because comm.Sum cannot handle 3D vectors.
-      if(!ann_deriv.empty()) {
-        for (unsigned i=0;  i<ann_deriv.size(); i++) {
-          for (unsigned j=0; j<ann_deriv[j].size(); j++) {
-            for (unsigned k=0; k<3; k++) {
-              comm.Sum(ann_deriv[i][j][k]);
-              ann_deriv[i][j][k] /= comm.Get_size();
-            }
-          }
-        }
-      }
-      // SD -- this is probably not needed.
-      comm.Sum(&m_virial[0][0],9);
-    }
-  }
-  prev_stp=getStep();
-
-  //Timing
-  if(timer) stopwatch.stop("4 Build For Derivatives");
-  if (enableLog) {
-    if(timer) {
-      log.printf("Timings for action %s with label %s \n", getName().c_str(), getLabel().c_str() );
-      log<<stopwatch;
-    }
-  }
+// Pass values and derivates to next stage
   unsigned total_count=0;
-  for (unsigned j = 0; j < Nlist; j++) {
-    unsigned limit=0;
-    limit = cPINES[j].size();
-    unsigned start_val=0;
-
-    int max_solv_atoms = NL_const_size;
-    if (std::find(NList_HW_blocks.begin(), NList_HW_blocks.end(), j) != NList_HW_blocks.end()) {
-      max_solv_atoms = 2*NL_const_size;
-    }
-
-    if (cross) {
-      if( (limit > max_solv_atoms) && (solv_blocks != 0) ){
-        start_val = limit - max_solv_atoms;
-      }
-    }
-    for (unsigned i = start_val; i < limit; i++) {
+  for (unsigned j = 0; j < N_Blocks; j++) {
+    // This should really be block_lengths + buffer and probably needs to be
+    // corrected elsewhere
+    for (unsigned i = 0; i < block_lengths[j]; i++) {
       string comp = "ELEMENT-" + to_string(total_count);
       Value* valueNew=getPntrToComponent(comp);
       valueNew -> set(cPINES[j][i]);
