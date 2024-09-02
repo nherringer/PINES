@@ -19,7 +19,7 @@ freely, subject to the following restrictions:
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 #ifndef __PLUMED_PINES_vec_PINES_h
 #define __PLUMED_PINES_vec_PINES_h
-
+#include <queue>
 
 using namespace std;
 
@@ -37,7 +37,7 @@ private:
   Stopwatch& stopwatch=*stopwatch_fwd;
   // Added NL_const_size to fix solute-solvent elements as constant size
   unsigned NL_const_size;
-  int updatePINES, N_Blocks;
+  int updatePINES, N_Blocks, steps_since_update, nstride;
   size_t Nprec;
   unsigned Natm,Nlist,NLsize;
   double Fvol,Vol0;
@@ -97,12 +97,14 @@ private:
   std::vector<int> block_lengths;
   std::vector<int> G1_limits;
   std::vector<int> Buffer_Pairs;
-  std::vector<std::vector<std::pair<AtomNumber>>> Exclude_Pairs;
+  std::vector<std::vector<std::pair<AtomNumber,AtomNumber>>> Exclude_Pairs;
   std::vector<std::vector<std::vector<AtomNumber>>> ID_list;
   std::vector<std::vector<std::vector<int>>> ResID_list;
   std::vector<std::vector<std::vector<string>>> Name_list;
   std::vector<std::vector<std::vector<bool>>> filters;
-  std::vector<std::pair<AtomNumber,AtomNumber>>pairlist;
+  std::vector<std::vector<std::pair<AtomNumber,AtomNumber>>>pairlist;
+  
+  //std::vector<std::priority_queue<std::pair<double,std::pair<AtomNumber,AtomNumber>>,std::vector<std::pair<double,std::pair<AtomNumber,AtomNumber>>>,CompareDist>>maxHeapVec;
 
 
   // dr_dxyz_array is the 3D array (dr/dxyz) used to build ann_deriv and ANN_sum_array --NH [NOT USED -- SD]
@@ -114,7 +116,7 @@ private:
 public:
   static void registerKeywords( Keywords& keys );                                                                       
   explicit PINES(const ActionOptions&); 
-  ~PINES();                                                                                                               
+  //~PINES();                                                                                                               
   // active methods:
   struct CompareDist {
     bool operator()(const std::pair<double, std::pair<AtomNumber, AtomNumber>>& p1, const std::pair<double, std::pair<AtomNumber, AtomNumber>>& p2) {
