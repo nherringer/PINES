@@ -58,7 +58,7 @@ namespace PLMD
       keys.add("optional", "ATOMID", "AtomIDs");
       keys.add("optional", "RESID", "ResIDs");
       keys.add("optional", "NAME", "Atom Names");
-      keys.add("optional", "EXLCUDE_PAIRS", "Excluded pairs");
+      keys.add("optional", "EXCLUDE_PAIRS", "Excluded pairs");
       keys.add("optional", "LIMIT_PER_G1", "NN for each group 1 atom");
       keys.add("optional", "BUFFER", "Number of additional pairwise distances to include as a buffer for each PIV block");
       keys.add("optional", "UPDATEPINES", "Frequency (in steps) at which the PINES is updated.");
@@ -130,6 +130,12 @@ namespace PLMD
                                             filters(std::vector<std::vector<std::vector<bool>>>(1)),
                                             pairlist(std::vector<std::vector<std::pair<AtomNumber, AtomNumber>>>(1))
     {
+      FILE *check_test = NULL;
+
+      string check_test_fileName = "Checkpoints.dat";
+      check_test = fopen(check_test_fileName.c_str(), "w+");
+      fprintf(check_test,"0. File initialized and flushed\n");
+      ::fflush(check_test);
       if (keywords.exists("ENABLE_LOG"))
       {
         parseFlag("ENABLE_LOG", enableLog);
@@ -141,13 +147,19 @@ namespace PLMD
       }
 
       // Precision on the real-to-integer transformation for the sorting
-      parse("PRECISION", Nprec);
+      if (keywords.exists("PRECISION"))
+      {
+        parse("PRECISION", Nprec);
+      }
       if (Nprec < 2)
         error("Precision must be => 2");
 
       // PBC
       bool nopbc = !pbc;
-      parseFlag("NOPBC", nopbc);
+      if (keywords.exists("NOPBC"))
+      {
+        parseFlag("NOPBC", nopbc);
+      }
       pbc = !nopbc;
       if (enableLog)
       {
@@ -162,7 +174,10 @@ namespace PLMD
       }
 
       // SERIAL/PARALLEL
-      parseFlag("SERIAL", serial);
+      if (keywords.exists("SERIAL"))
+      {
+        parseFlag("SERIAL", serial);
+      }
       if (enableLog)
       {
         if (serial)
@@ -176,7 +191,10 @@ namespace PLMD
       }
 
       // Derivatives
-      parseFlag("DERIVATIVES", CompDer);
+      if (keywords.exists("DERIVATIVES"))
+      {
+        parseFlag("DERIVATIVES", CompDer);
+      }
       if (enableLog)
       {
         if (CompDer)
@@ -184,7 +202,10 @@ namespace PLMD
       }
 
       // Timing
-      parseFlag("TIMER", timer);
+      if (keywords.exists("TIMER"))
+      {
+        parseFlag("TIMER", timer);
+      }
       if (timer)
       {
         if (enableLog)
@@ -196,8 +217,10 @@ namespace PLMD
       }
 
       // Test
-      parseFlag("TEST", test);
-
+      if (keywords.exists("TEST"))
+      {
+        parseFlag("TEST", test);
+      }
       // Constant Neighbor List Size
       if (keywords.exists("NL_CONSTANT_SIZE"))
       {
@@ -211,7 +234,10 @@ namespace PLMD
       }
 
       // Volume Scaling
-      parse("VOLUME", Vol0);
+      if (keywords.exists("VOLUME"))
+      {
+        parse("VOLUME", Vol0);
+      }
       if (Vol0 > 0)
       {
         Svol = true;
@@ -263,7 +289,14 @@ namespace PLMD
 
       // Create variable to get number of blocks
       parse("N_BLOCKS", N_Blocks);
-      parse("NL_STRIDE", nstride);
+      if (keywords.exists("NL_STRIDE"))
+      {
+        parse("NL_STRIDE", nstride);
+      }
+
+      fprintf(check_test, "1: Parsed Keywords\n");
+      fprintf(check_test, "%d\n", N_Blocks);
+      ::fflush(check_test);
       // These all need to be initialized to take the relevant parameters
       // from all blocks
       block_params.resize(N_Blocks);
@@ -276,14 +309,18 @@ namespace PLMD
       Name_list.resize(N_Blocks);
       //maxHeapVec.resize(N_Blocks);
 
+      fprintf(check_test, "Vars resized to N_Blocks\n");
+      ::fflush(check_test);
       for (unsigned n = 0; n < N_Blocks; n++)
       {
         G1_limits[n] = 0;
         ID_list[n].resize(2);
         ResID_list[n].resize(2);
         Name_list[n].resize(2);
+        block_groups_atom_list[n].resize(2);
       }
-
+      fprintf(check_test, "Vars resized for G1/G2\n");
+      ::fflush(check_test);
       // Check that the correct number of Blocks are specified
       for (unsigned n = 0; n < N_Blocks; n++)
       {
@@ -291,156 +328,210 @@ namespace PLMD
           break;
       }
 
-      FILE *parse_test = NULL;
-
-      string parse_test_fileName = "ParseTest.dat";
-      parse_test = fopen(parse_test_fileName.c_str(), "w+");
+      fprintf(check_test, "Block params parsed:\n%s\n", block_params[0].c_str());
+      ::fflush(check_test);
 
       // Parse blocks for keywords
       for (int n = 0; n < N_Blocks; n++)
       {
-        int block_length;
-        int limit_per_G1 = 0;
-        std::vector<AtomNumber> ex_pairs_n;
-        std::vector<AtomNumber> g1_ids;
-        std::vector<AtomNumber> g2_ids;
-        std::vector<int> g1_resids;
-        std::vector<int> g2_resids;
+        string block_length;
+        string limit_per_G1;
+        std::vector<string> ex_pairs_n;
+        std::vector<string> g1_ids;
+        std::vector<string> g2_ids;
+        std::vector<string> g1_resids;
+        std::vector<string> g2_resids;
         std::vector<string> g1_names;
         std::vector<string> g2_names;
-        // fprintf(parse_test, "Block Params (%d):\n", n);
-        // fprintf(parse_test, "%s\n", block_params[n].c_str());
+        // // fprintf(parse_test, "Block Params (%d):\n", n);
+        // // fprintf(parse_test, "%s\n", block_params[n].c_str());
         std::vector<string> block_data = Tools::getWords(block_params[n]);
-        // fprintf(parse_test, "Block Data (%d):\n", n);
+        for (int m = 0; m < block_data.size(); m++)
+        {
+          fprintf(check_test, "Block data parsed:\n%s\n", block_data[m].c_str());
+        }
+        ::fflush(check_test);
+        // // fprintf(parse_test, "Block Data (%d):\n", n);
         // for(int x=0; x<block_data.size(); x++){
-        //   fprintf(parse_test, "%s\n", block_data[x].c_str());
+        //   // fprintf(parse_test, "%s\n", block_data[x].c_str());
         // }
         // vector<string> G1_data=Tools::getWords(block_data[0]);
         std::vector<string> G1_data;
         Tools::parseVector(block_data, "G1", G1_data);
-        // fprintf(parse_test, "Block Data [0] (G1):\n", n);
+        for (int m = 0; m < G1_data.size(); m++)
+        {
+          fprintf(check_test, "G1 data parsed:\n%s\n", G1_data[m].c_str());
+        }
+        ::fflush(check_test);
+        // // fprintf(parse_test, "Block Data [0] (G1):\n", n);
         // for(int x=0; x<G1_data.size(); x++){
-        //   fprintf(parse_test, "%s\n", G1_data[x].c_str());
+        //   // fprintf(parse_test, "%s\n", G1_data[x].c_str());
         // }
-        // fprintf(parse_test, "Block Data [1] (G2):\n", n);
+        // // fprintf(parse_test, "Block Data [1] (G2):\n", n);
         std::vector<string> G2_data;
         Tools::parseVector(block_data, "G2", G2_data);
+        for (int m = 0; m < G2_data.size(); m++)
+        {
+          fprintf(check_test, "G2 data parsed:\n%s\n", G2_data[m].c_str());
+        }
+        ::fflush(check_test);
         // for(int x=0; x<G2_data.size(); x++){
-        //   fprintf(parse_test, "%s\n", G2_data[x].c_str());
+        //   // fprintf(parse_test, "%s\n", G2_data[x].c_str());
         // }
         Tools::parseVector(G1_data, "ATOMID", g1_ids);
-        // fprintf(parse_test, "g1_ids size: %d\n", g1_ids.size());
+        fprintf(check_test, "Got past empty ATOMID parsing!\n");
+        ::fflush(check_test);
+        // // fprintf(parse_test, "g1_ids size: %d\n", g1_ids.size());
         for (int i = 0; i < g1_ids.size(); i++)
         {
-          ID_list[n][0].push_back(g1_ids[i]);
-          // fprintf(parse_test, "%d\n", g1_ids[i]);
+          AtomNumber g1i;
+          g1i.setIndex(std::stoi(g1_ids[i]));
+          ID_list[n][0].push_back(g1i);
+          // // fprintf(parse_test, "%d\n", g1_ids[i]);
         }
 
+        fprintf(check_test, "Got past empty for loop parsing!\n");
+        ::fflush(check_test);
+
         Tools::parseVector(G2_data, "ATOMID", g2_ids);
-        // fprintf(parse_test, "g2_ids size: %d\n", g2_ids.size());
+        // // fprintf(parse_test, "g2_ids size: %d\n", g2_ids.size());
         for (int i = 0; i < g2_ids.size(); i++)
         {
-          ID_list[n][1].push_back(g2_ids[i]);
-          // fprintf(parse_test, "%d\n", g2_ids[i]);
+          AtomNumber g2i;
+          g2i.setIndex(std::stoi(g2_ids[i]));
+          ID_list[n][1].push_back(g2i);
+          // // fprintf(parse_test, "%d\n", g2_ids[i]);
         }
+
+        fprintf(check_test, "Got past g2_ids!\n");
+        ::fflush(check_test);
         Tools::parseVector(G1_data, "RESID", g1_resids);
-        // fprintf(parse_test, "g1_resids size: %d\n", g1_resids.size());
+        // // fprintf(parse_test, "g1_resids size: %d\n", g1_resids.size());
         for (int i = 0; i < g1_resids.size(); i++)
         {
-          ResID_list[n][0].push_back(g1_resids[i]);
-          // fprintf(parse_test, "%d\n", g1_resids[i]);
+          ResID_list[n][0].push_back(std::stoi(g1_resids[i]));
+          // // fprintf(parse_test, "%d\n", g1_resids[i]);
         }
         Tools::parseVector(G2_data, "RESID", g2_resids);
-        // fprintf(parse_test, "g2_resids size: %d\n", g2_resids.size());
+        // // fprintf(parse_test, "g2_resids size: %d\n", g2_resids.size());
         for (int i = 0; i < g2_resids.size(); i++)
         {
-          ResID_list[n][1].push_back(g2_resids[i]);
-          // fprintf(parse_test, "%d\n", g2_resids[i]);
+          ResID_list[n][1].push_back(std::stoi(g2_resids[i]));
+          // // fprintf(parse_test, "%d\n", g2_resids[i]);
         }
+        fprintf(check_test, "Got past g2_resids!\n");
+        ::fflush(check_test);
         Tools::parseVector(G1_data, "NAME", g1_names);
-        // fprintf(parse_test, "g1_names size: %d\n", g1_names.size());
+        // // fprintf(parse_test, "g1_names size: %d\n", g1_names.size());
+        for (int m = 0; m < g1_names.size(); m++)
+        {
+          fprintf(check_test, "g1_names parsed:\n%s\n", g1_names[m].c_str());
+        }
+        ::fflush(check_test);
         for (int i = 0; i < g1_names.size(); i++)
         {
           Name_list[n][0].push_back(g1_names[i]);
-          // fprintf(parse_test, "%s\n", g1_names[i].c_str());
+          // // fprintf(parse_test, "%s\n", g1_names[i].c_str());
         }
         Tools::parseVector(G2_data, "NAME", g2_names);
-        // fprintf(parse_test, "g2_names size: %d\n", g2_names.size());
+        // // fprintf(parse_test, "g2_names size: %d\n", g2_names.size());
         for (int i = 0; i < g2_names.size(); i++)
         {
           Name_list[n][1].push_back(g2_names[i]);
-          // fprintf(parse_test, "%s\n", g2_names[i].c_str());
+          // // fprintf(parse_test, "%s\n", g2_names[i].c_str());
         }
 
-        // fprintf(parse_test, "%d\n", g1_ids);
-        // fprintf(parse_test, "%d\n", g2_ids);
-        // fprintf(parse_test, "%d\n", g1_resids);
-        // fprintf(parse_test, "%d\n", g2_resids);
+        // // fprintf(parse_test, "%d\n", g1_ids);
+        // // fprintf(parse_test, "%d\n", g2_ids);
+        // // fprintf(parse_test, "%d\n", g1_resids);
+        // // fprintf(parse_test, "%d\n", g2_resids);
 
         Tools::parse(block_data, "SIZE", block_length);
-        block_lengths[n] = block_length;
-        int buffer_pairs = block_length * 2;
+        fprintf(check_test, "Block length parsed:\n%s\n", block_length.c_str());
+        ::fflush(check_test);
+        block_lengths[n] = std::stoi(block_length);
+        string buffer_pairs;
         Tools::parseVector(block_data, "EXCLUDE_PAIRS", ex_pairs_n);
-        for (int i = 0; i < ex_pairs_n.size() - 1; i++)
+        if (!ex_pairs_n.empty())
         {
-          std::pair<AtomNumber, AtomNumber> excluded_pair;
-          excluded_pair = {ex_pairs_n[i], ex_pairs_n[i + 1]};
-          Exclude_Pairs[n].push_back(excluded_pair);
+          for (int i = 0; i < ex_pairs_n.size() - 1; i++)
+          {
+            AtomNumber atom1; 
+            atom1.setIndex(std::stoi(ex_pairs_n[i]));
+            AtomNumber atom2; 
+            atom2.setIndex(std::stoi(ex_pairs_n[i+1]));
+
+            std::pair<AtomNumber, AtomNumber> excluded_pair;
+            excluded_pair = {atom1, atom2};
+            Exclude_Pairs[n].push_back(excluded_pair);
+          }
         }
         Tools::parse(block_data, "LIMIT_PER_G1", limit_per_G1);
         Tools::parse(block_data, "BUFFER", buffer_pairs);
-        fprintf(parse_test, "Limit per G1: %d\n", limit_per_G1);
-        fprintf(parse_test, "Buffer Pairs: %d\n", buffer_pairs);
-        if (limit_per_G1 > 0)
+        // fprintf(parse_test, "Limit per G1: %d\n", limit_per_G1);
+        // fprintf(parse_test, "Buffer Pairs: %d\n", buffer_pairs);
+        if (!limit_per_G1.empty())
         {
-          G1_limits[n] = limit_per_G1;
+          G1_limits[n] = std::stoi(limit_per_G1);
         }
-        Buffer_Pairs[n] = buffer_pairs;
+        else
+        {
+          G1_limits[n] = 0;
+        }
+        if (!buffer_pairs.empty())
+        {
+          Buffer_Pairs[n] = std::stoi(buffer_pairs);
+        }
+        else
+        {
+          Buffer_Pairs[n] = 0;
+        }
       }
-
-      fprintf(parse_test, "N_Blocks = %d\n\n\n", N_Blocks);
-      // fprintf(parse_test, "Block Params:\n");
-      for (int n = 0; n < N_Blocks; n++)
-      {
-        // fprintf(parse_test, "%s\n", block_params[n].c_str());
-        fprintf(parse_test, "Block %d\n", n);
-        for (int g = 0; g < 2; g++)
-        {
-          fprintf(parse_test, "ID List G%d:\n", (g + 1));
-          for (int f = 0; f < ID_list[n][g].size(); f++)
-          {
-            fprintf(parse_test, "%d\t", ID_list[n][g][f]);
-          }
-          fprintf(parse_test, "\n");
-        }
-        for (int g = 0; g < 2; g++)
-        {
-          fprintf(parse_test, "RESID List G%d:\n", (g + 1));
-          for (int f = 0; f < ResID_list[n][g].size(); f++)
-          {
-            fprintf(parse_test, "%d\t", ResID_list[n][g][f]);
-          }
-          fprintf(parse_test, "\n");
-        }
-        for (int g = 0; g < 2; g++)
-        {
-          fprintf(parse_test, "Name List G%d:\n", (g + 1));
-          for (int f = 0; f < Name_list[n][g].size(); f++)
-          {
-            fprintf(parse_test, "%s\t", Name_list[n][g][f].c_str());
-          }
-          fprintf(parse_test, "\n");
-        }
-        fprintf(parse_test, "Block Length: %d\n", block_lengths[n]);
-        fprintf(parse_test, "Exclude Pairs: \n");
-        for (int f = 0; f < Exclude_Pairs[n].size(); f++)
-        {
-          fprintf(parse_test, "%d\t", Exclude_Pairs[n][f]);
-        }
-        fprintf(parse_test, "\n");
-      }
-      fclose(parse_test);
-      exit();
+      fprintf(check_test, "2: Parsed PIV Blocks\n");
+      ::fflush(check_test);
+      // fprintf(parse_test, "N_Blocks = %d\n\n\n", N_Blocks);
+      // // fprintf(parse_test, "Block Params:\n");
+      // for (int n = 0; n < N_Blocks; n++)
+      // {
+      //   // // fprintf(parse_test, "%s\n", block_params[n].c_str());
+      //   // fprintf(parse_test, "Block %d\n", n);
+      //   for (int g = 0; g < 2; g++)
+      //   {
+      //     // fprintf(parse_test, "ID List G%d:\n", (g + 1));
+      //     for (int f = 0; f < ID_list[n][g].size(); f++)
+      //     {
+      //       // fprintf(parse_test, "%d\t", ID_list[n][g][f]);
+      //     }
+      //     // fprintf(parse_test, "\n");
+      //   }
+      //   for (int g = 0; g < 2; g++)
+      //   {
+      //     // fprintf(parse_test, "RESID List G%d:\n", (g + 1));
+      //     for (int f = 0; f < ResID_list[n][g].size(); f++)
+      //     {
+      //       // fprintf(parse_test, "%d\t", ResID_list[n][g][f]);
+      //     }
+      //     // fprintf(parse_test, "\n");
+      //   }
+      //   for (int g = 0; g < 2; g++)
+      //   {
+      //     // fprintf(parse_test, "Name List G%d:\n", (g + 1));
+      //     for (int f = 0; f < Name_list[n][g].size(); f++)
+      //     {
+      //       // fprintf(parse_test, "%s\t", Name_list[n][g][f].c_str());
+      //     }
+      //     // fprintf(parse_test, "\n");
+      //   }
+      //   // fprintf(parse_test, "Block Length: %d\n", block_lengths[n]);
+      //   // fprintf(parse_test, "Exclude Pairs: \n");
+      //   for (int f = 0; f < Exclude_Pairs[n].size(); f++)
+      //   {
+      //     // fprintf(parse_test, "%d\t", Exclude_Pairs[n][f]);
+      //   }
+      //   // fprintf(parse_test, "\n");
+      // }
+      //fclose(parse_test);
+      //exit();
 
       // In previous section build filter lists to use in building atom lists
       // ID_list, Resid_list, and Name_list are all vectors of dimension N_blocks x 2 (G1/G2) x n components
@@ -487,11 +578,12 @@ namespace PLMD
           }
         }
       }
-
+      fprintf(check_test, "3: Parsed Filters\n");
+      ::fflush(check_test);
       // Not sure if the outer loop should be over n blocks or over i indices
       listall.clear();
       // Need to add code for global atom list
-      for (int i; i < mypdb.getAtomNumbers().size(); i++)
+      for (int i=0; i < mypdb.getAtomNumbers().size(); i++)
       {
         AtomNumber ind = mypdb.getAtomNumbers()[i];
         int resid = mypdb.getResidueNumber(ind);
@@ -505,7 +597,10 @@ namespace PLMD
             bool id_check = false;
             bool res_check = false;
             bool name_check = false;
+            int f = 0;
             int caseIndex = filters[n][g][2] * 4 + filters[n][g][1] * 2 + filters[n][g][0];
+            fprintf(check_test, "caseIndex: %d\n", caseIndex);
+            ::fflush(check_test);
             switch (caseIndex)
             {
             case 0: // 000 in binary (false, false, false)
@@ -514,17 +609,29 @@ namespace PLMD
               error("Error: Block" + std::to_string(n) + ", Group" + std::to_string(g) + " has no identifier corresponding to ATOMID, RESID, or NAME");
               break;
             case 1: // 001 in binary (false, false, true)
-              for (int f = 0; f < ID_list[n][g].size(); f++)
+              while (f < ID_list[n][g].size() ) 
               {
-                if (ind == ID_list[n][g][f])
+                if (ind == ID_list[n][g][f]) {
+                    block_groups_atom_list[n][g].push_back(ind);
+                    ID_list[n][g].erase(ID_list[n][g].begin() + f);
+                    atom_added = true;
+                    // No need to increment `f` since we just erased an element
+                } else 
                 {
-                  block_groups_atom_list[n][g].push_back(ind);
-                  // Why am I erasing the ID here? Somethings the world may never know...
-                  ID_list[n][g].erase(ID_list[n][g].begin() + f);
-                  atom_added = true;
-                  break;
+                    ++f;  // Only increment if we didn't erase
                 }
               }
+              // for (int f = 0; f < ID_list[n][g].size(); f++)
+              // {
+              //   if (ind == ID_list[n][g][f])
+              //   {
+              //     block_groups_atom_list[n][g].push_back(ind);
+              //     // Why am I erasing the ID here? Somethings the world may never know...
+              //     ID_list[n][g].erase(ID_list[n][g].begin() + f);
+              //     atom_added = true;
+              //     break;
+              //   }
+              // }
               break;
             case 2: // 010 in binary (false, true, false)
               for (int f = 0; f < ResID_list[n][g].size(); f++)
@@ -569,11 +676,19 @@ namespace PLMD
               // break;
               break;
             case 4: // 100 in binary (true, false, false)
+              fprintf(check_test, "I'm in case %d\n", caseIndex);
+              ::fflush(check_test);
               for (int f = 0; f < Name_list[n][g].size(); f++)
               {
+                fprintf(check_test, "For loop f\n");
+                ::fflush(check_test);
                 if (atom_name == Name_list[n][g][f])
                 {
+                  fprintf(check_test, "Atom Name: %s\n", atom_name.c_str());
+                  ::fflush(check_test);
                   block_groups_atom_list[n][g].push_back(ind);
+                  fprintf(check_test, "Pushed back\n");
+                  ::fflush(check_test);
                   atom_added = true;
                   break;
                 }
@@ -672,12 +787,15 @@ namespace PLMD
             }
           }
         }
+        fprintf(check_test, "Before adding atom\n");
+        ::fflush(check_test);
         if (atom_added)
         {
           listall.push_back(ind);
         }
       }
-
+      fprintf(check_test, "4: Collected all possible relevent atom indices\n");
+      ::fflush(check_test);
       // Should I have a counter to determine stride updates? If a tolerance update is triggered a step before a stride
       // update would have been triggered it is inefficient to immediately update again. The stride update should be the
       // stride since the last update, whether from stride or tolerance.
@@ -724,6 +842,8 @@ namespace PLMD
           }
         }
       }
+      fprintf(check_test, "5: Generated MaxHeapVec for first frame (PDB)\n");
+      ::fflush(check_test);
       if (enableLog)
       {
         log << "Total Nlists: " << N_Blocks << " \n";
@@ -823,6 +943,8 @@ namespace PLMD
       }
 
       ds_array.resize(total_count);
+      fprintf(check_test, "6: Requested reduced list (generate from MaxHeapVec inds)\n");
+      ::fflush(check_test);
     }
 
     // Does this need to be implemented for the heaps?
