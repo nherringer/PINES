@@ -121,6 +121,7 @@ namespace PLMD
                                             block_params(std::vector<string>(1)),
                                             block_groups_atom_list(std::vector<std::vector<std::vector<AtomNumber>>>(1)),
                                             block_lengths(std::vector<int>(1)),
+                                            tot_num_pairs(std::vector<int>(1)),
                                             G1_limits(std::vector<int>(1)),
                                             Buffer_Pairs(std::vector<int>(1)),
                                             Exclude_Pairs(std::vector<std::vector<std::pair<AtomNumber, AtomNumber>>>(1)),
@@ -174,6 +175,7 @@ namespace PLMD
       }
 
       // SERIAL/PARALLEL
+      bool serial = false;
       if (keywords.exists("SERIAL"))
       {
         parseFlag("SERIAL", serial);
@@ -243,18 +245,6 @@ namespace PLMD
         Svol = true;
       }
 
-      // PINES scaled option
-      scaling.resize(Nlist);
-      for (unsigned j = 0; j < Nlist; j++)
-      {
-        scaling[j] = 1.;
-      }
-
-      if (keywords.exists("SFACTOR"))
-      {
-        parseVector("SFACTOR", scaling);
-      }
-
       // Added STRIDE to write PINES representation and ANN sum derivatives -- SD
       if (keywords.exists("WRITEPINESTRAJ"))
       {
@@ -294,6 +284,19 @@ namespace PLMD
         parse("NL_STRIDE", nstride);
       }
 
+
+      // PINES scaled option
+      scaling.resize(N_Blocks);
+      for (unsigned n = 0; n < N_Blocks; n++)
+      {
+        scaling[n] = 1.;
+      }
+
+      if (keywords.exists("SFACTOR"))
+      {
+        parseVector("SFACTOR", scaling);
+      }
+
       fprintf(check_test, "1: Parsed Keywords\n");
       fprintf(check_test, "%d\n", N_Blocks);
       ::fflush(check_test);
@@ -302,11 +305,14 @@ namespace PLMD
       block_params.resize(N_Blocks);
       block_groups_atom_list.resize(N_Blocks);
       block_lengths.resize(N_Blocks);
+      Buffer_Pairs.resize(N_Blocks);
+      tot_num_pairs.resize(N_Blocks);
       G1_limits.resize(N_Blocks);
       Exclude_Pairs.resize(N_Blocks);
       ID_list.resize(N_Blocks);
       ResID_list.resize(N_Blocks);
       Name_list.resize(N_Blocks);
+      pairlist.resize(N_Blocks);
       //maxHeapVec.resize(N_Blocks);
 
       fprintf(check_test, "Vars resized to N_Blocks\n");
@@ -486,6 +492,8 @@ namespace PLMD
         {
           Buffer_Pairs[n] = 0;
         }
+        tot_num_pairs[n] = block_lengths[n] + Buffer_Pairs[n];
+        pairlist[n].resize(tot_num_pairs[n]);
       }
       fprintf(check_test, "2: Parsed PIV Blocks\n");
       ::fflush(check_test);
@@ -806,11 +814,11 @@ namespace PLMD
       using MaxHeap = std::priority_queue<DistAtomPair, std::vector<DistAtomPair>, CompareDist>;
       using MaxHeapVector = std::vector<MaxHeap>;
       MaxHeapVector maxHeapVec(N_Blocks);
+      std::vector<std::vector<std::pair<AtomNumber, AtomNumber>>> unique_pairs(N_Blocks);
       if (getStep() == 0)
       {
         for (int n = 0; n < N_Blocks; n++)
-        {
-          int tot_num_pairs = block_lengths[n] + Buffer_Pairs[n];
+        { //int tot_num_pairs = block_lengths[n] + Buffer_Pairs[n];
           for (int i = 0; i < block_groups_atom_list[n][0].size(); i++)
           {
             Vector Pos0, Pos1, ddist;
@@ -819,26 +827,51 @@ namespace PLMD
             for (int j = 0; j < block_groups_atom_list[n][1].size(); j++)
             {
               AtomNumber ind1 = block_groups_atom_list[n][1][j];
+              if (ind1 == ind0)
+              {
+                continue;
+              }
               AtomPair test_pair = {ind0, ind1};
+              AtomPair reverse_pair = {ind1, ind0};
               if (std::find(Exclude_Pairs[n].begin(), Exclude_Pairs[n].end(), test_pair) != Exclude_Pairs[n].end())
               {
                 continue;
+              }
+              if (std::find(Exclude_Pairs[n].begin(), Exclude_Pairs[n].end(), reverse_pair) != Exclude_Pairs[n].end())
+              {
+                continue;
+              }
+              if (std::find(unique_pairs[n].begin(), unique_pairs[n].end(), reverse_pair) != unique_pairs[n].end())
+              {
+                continue;
+              } else 
+              {
+                unique_pairs[n].push_back(test_pair);
               }
               Pos1 = mypdb.getPosition(ind1);
               ddist = pbcDistance(Pos0, Pos1);
               double mag;
               mag = ddist.modulo();
-              if (maxHeapVec[n].size() < tot_num_pairs)
+              if (maxHeapVec[n].size() < tot_num_pairs[n])
               {
                 maxHeapVec[n].push({mag, {ind0, ind1}});
               }
               else if (mag < maxHeapVec[n].top().first)
               {
                 maxHeapVec[n].pop();
-                maxHeapVec[n].push(std::make_pair(mag, std::make_pair(ind0, ind1)));
-                //maxHeapVec[n].push({mag, {ind0, ind1}});
+                maxHeapVec[n].push({mag, {ind0, ind1}});
+                //maxHeapVec[n].push(std::make_pair(mag, std::make_pair(ind0, ind1)));
               }
             }
+          }
+        }
+        MaxHeapVector maxHeapVecCopy = maxHeapVec;
+        for (int n=0; n<N_Blocks; n++)
+        {
+          for (int i=0; i<maxHeapVec[n].size(); i++)
+          {
+            pairlist[n][i] = maxHeapVecCopy[n].top().second;
+            maxHeapVecCopy[n].pop();
           }
         }
       }
@@ -978,8 +1011,16 @@ namespace PLMD
       // To a (dynamic) local perspective where the condition is triggered only nstride since
       // The last update
       // std::vector<std::pair<AtomNumber, AtomNumber> > pairlist(N_Blocks);
+      FILE *prep_check = NULL;
+
+      string prep_check_fileName = "Prepare_Checkpoints.dat";
+      prep_check = fopen(prep_check_fileName.c_str(), "w+");
+      fprintf(prep_check,"0. File initialized and flushed. getStep = %d\n",getStep());
+      ::fflush(prep_check);
       if (getStep() != 0)
       {
+        fprintf(prep_check,"In non-first step\n");
+        ::fflush(prep_check);
         int total_count = 0;
         for (int n = 0; n < N_Blocks; n++)
         {
@@ -988,42 +1029,67 @@ namespace PLMD
 
         if (steps_since_update == 0)
         {
-
+          fprintf(prep_check,"No steps since update\n");
+          ::fflush(prep_check);
           // delete maxHeapVec; // ???
           using AtomPair = std::pair<AtomNumber, AtomNumber>;
           using DistAtomPair = std::pair<double, AtomPair>;
           using MaxHeap = std::priority_queue<DistAtomPair, std::vector<DistAtomPair>, CompareDist>;
           using MaxHeapVector = std::vector<MaxHeap>;
           MaxHeapVector maxHeapVec(N_Blocks);
+          std::vector<std::vector<std::pair<AtomNumber, AtomNumber>>> unique_pairs(N_Blocks);
           for (int n = 0; n < N_Blocks; n++)
-          {
-            int tot_num_pairs = block_lengths[n] + Buffer_Pairs[n];
+          { //int tot_num_pairs = block_lengths[n] + Buffer_Pairs[n];
+            fprintf(prep_check,"In n loop. tot_num_pairs = %d\n", tot_num_pairs[n]);
+            ::fflush(prep_check);
             for (int i = 0; i < block_groups_atom_list[n][0].size(); i++)
             {
               Vector Pos0, Pos1;
               AtomNumber ind0 = block_groups_atom_list[n][0][i];
               Pos0 = getPosition(ind0.index());
+              fprintf(prep_check,"In i loop\n");
+              ::fflush(prep_check);
               for (int j = 0; j < block_groups_atom_list[n][1].size(); j++)
               {
                 AtomNumber ind1 = block_groups_atom_list[n][1][j];
+                if (ind1 == ind0)
+                {
+                  continue;
+                }
                 AtomPair test_pair = {ind0, ind1};
+                AtomPair reverse_pair = {ind1, ind0};
                 if (std::find(Exclude_Pairs[n].begin(), Exclude_Pairs[n].end(), test_pair) != Exclude_Pairs[n].end())
                 {
                   continue;
+                }
+                if (std::find(Exclude_Pairs[n].begin(), Exclude_Pairs[n].end(), reverse_pair) != Exclude_Pairs[n].end())
+                {
+                  continue;
+                }
+                if (std::find(unique_pairs[n].begin(), unique_pairs[n].end(), reverse_pair) != unique_pairs[n].end())
+                {
+                  continue;
+                } else 
+                {
+                  unique_pairs[n].push_back(test_pair);
                 }
                 Pos1 = getPosition(ind1.index());
                 Vector ddist;
                 ddist = pbcDistance(Pos0, Pos1);
                 double mag;
                 mag = ddist.modulo();
-                if (maxHeapVec[n].size() < tot_num_pairs)
+                if (maxHeapVec[n].size() < tot_num_pairs[n])
                 {
                   maxHeapVec[n].push({mag, {ind0, ind1}});
+                  fprintf(prep_check,"MaxHeap size < tot_num_pairs\n");
+                  ::fflush(prep_check);
                 }
                 else if (mag < maxHeapVec[n].top().first)
                 {
                   maxHeapVec[n].pop();
                   maxHeapVec[n].push({mag, {ind0, ind1}});
+                  fprintf(prep_check,"MaxHeap single replacement\n");
+                  ::fflush(prep_check);
                 }
               }
             }
@@ -1034,10 +1100,16 @@ namespace PLMD
           for (int n = 0; n < N_Blocks; n++)
           {
             MaxHeap tempHeap = maxHeapVec[n];
-            while (!tempHeap.empty())
+            // for (int i = 0; i < pairlist[n].size(); i++)
+            // {
+            //   pairlist[n][i] = -1;
+            // }
+            
+            for (int i = 0; i < tot_num_pairs[n]; i++)
             {
               DistAtomPair topElement = tempHeap.top();
               tempHeap.pop();
+              pairlist[n][i] = topElement.second;
               uniqueIndices.insert(topElement.second.first);
               uniqueIndices.insert(topElement.second.second);
             }
@@ -1045,7 +1117,8 @@ namespace PLMD
           listreduced.clear();
           listreduced.insert(listreduced.end(), uniqueIndices.begin(), uniqueIndices.end());
           requestAtoms(listreduced);
-
+          fprintf(prep_check,"listreduced created and used to request atoms\n");
+          ::fflush(prep_check);
           ann_deriv.resize(listreduced.size());
 
           // printf("TOTAL COUNT :%d\n\n\n", total_count);
@@ -1056,6 +1129,8 @@ namespace PLMD
 
           ds_array.resize(total_count);
           steps_since_update += 1;
+          fprintf(prep_check,"End of step_since_update=0 if \n");
+          ::fflush(prep_check);
         }
         else if (steps_since_update >= nstride)
         {
@@ -1068,12 +1143,14 @@ namespace PLMD
           {
             total_count += block_lengths[n];
           }
-          for (unsigned i = 0; i < ann_deriv.size(); i++)
+          for (int i = 0; i < ann_deriv.size(); i++)
           {
             ann_deriv[i].resize(total_count);
           }
           ds_array.resize(total_count);
           steps_since_update = 0;
+          fprintf(prep_check,"End of step_since_update>= nstride if \n");
+          ::fflush(prep_check);
         }
       }
     }
@@ -1081,6 +1158,12 @@ namespace PLMD
     void PINES::calculate()
     {
 
+      FILE *calc_check = NULL;
+
+      string calc_check_fileName = "Calculate_Checkpoints.dat";
+      calc_check = fopen(calc_check_fileName.c_str(), "w+");
+      fprintf(calc_check,"0. File initialized and flushed\ngetStep = %d\n",getStep());
+      ::fflush(calc_check);
       // Local variables
       // The following are probably needed as static arrays
       static int prev_stp = -1;
@@ -1094,7 +1177,8 @@ namespace PLMD
       // std:: vector<std::pair<double, std::pair<AtomNumber, AtomNumber> > > sortedHeapDict(N_Blocks);
       size_t stride = 1;
       unsigned rank = 0;
-
+      fprintf(calc_check,"1. Declared static arrays\n");
+      ::fflush(calc_check);
       // Serial vs parallelization?
       if (!serial)
       {
@@ -1107,67 +1191,70 @@ namespace PLMD
         rank = 0;
       }
 
+      fprintf(calc_check,"2. Passed serial/parallelization check. Serial = %s\n", serial ? "true" : "false");
+      ::fflush(calc_check);
+
       // Tolerance check and update
       //  Do the sorting only once per timestep to avoid building the PINES N times for N rPINES PDB structures!
       //
       //  build COMs from positions if requested
       //  update neighbor lists when an atom moves out of the Neighbor list skin
-      if (doneigh && ((getStep() + 1) % nlall->getStride() == 0))
-      {
-        bool doupdate = false;
-        // For the first step build previous positions = actual positions
-        if (prev_stp == -1)
-        {
-          for (unsigned j = 0; j < Nlist; j++)
-          {
-            for (unsigned i = 0; i < nl[j]->getFullAtomList().size(); i++)
-            {
-              Vector Pos;
+      // if (doneigh && ((getStep() + 1) % nlall->getStride() == 0))
+      // {
+      //   bool doupdate = false;
+      //   // For the first step build previous positions = actual positions
+      //   if (prev_stp == -1)
+      //   {
+      //     for (unsigned j = 0; j < Nlist; j++)
+      //     {
+      //       for (unsigned i = 0; i < nl[j]->getFullAtomList().size(); i++)
+      //       {
+      //         Vector Pos;
 
-              Pos = getPosition(nl[j]->getFullAtomList()[i].index());
+      //         Pos = getPosition(nl[j]->getFullAtomList()[i].index());
 
-              prev_pos[j].push_back(Pos);
-            }
-          }
-          doupdate = true;
-        }
-        // Decide whether to update lists based on atom displacement, every stride
-        std::vector<std::vector<Vector>> tmp_pos(Nlist);
-        if (getStep() % nlall->getStride() == 0)
-        {
-          for (unsigned j = 0; j < Nlist; j++)
-          {
-            for (unsigned i = 0; i < nl[j]->getFullAtomList().size(); i++)
-            {
-              Vector Pos;
+      //         prev_pos[j].push_back(Pos);
+      //       }
+      //     }
+      //     doupdate = true;
+      //   }
+      //   // Decide whether to update lists based on atom displacement, every stride
+      //   std::vector<std::vector<Vector>> tmp_pos(Nlist);
+      //   if (getStep() % nlall->getStride() == 0)
+      //   {
+      //     for (unsigned j = 0; j < Nlist; j++)
+      //     {
+      //       for (unsigned i = 0; i < nl[j]->getFullAtomList().size(); i++)
+      //       {
+      //         Vector Pos;
 
-              Pos = getPosition(nl[j]->getFullAtomList()[i].index());
+      //         Pos = getPosition(nl[j]->getFullAtomList()[i].index());
 
-              tmp_pos[j].push_back(Pos);
-              if (pbcDistance(tmp_pos[j][i], prev_pos[j][i]).modulo() >= nl_skin[j])
-              {
-                doupdate = true;
-              }
-            }
-          }
-        }
-        // Update Nlists if needed
-        if (doupdate == true)
-        {
-          for (unsigned j = 0; j < Nlist; j++)
-          {
-            for (unsigned i = 0; i < nl[j]->getFullAtomList().size(); i++)
-            {
-              prev_pos[j][i] = tmp_pos[j][i];
-            }
-            nl[j]->update(prev_pos[j]);
-            if (enableLog)
-            {
-              log << " Step " << getStep() << "  Neighbour lists updated " << nl[j]->size() << " \n";
-            }
-          }
-        }
-      }
+      //         tmp_pos[j].push_back(Pos);
+      //         if (pbcDistance(tmp_pos[j][i], prev_pos[j][i]).modulo() >= nl_skin[j])
+      //         {
+      //           doupdate = true;
+      //         }
+      //       }
+      //     }
+      //   }
+      //   // Update Nlists if needed
+      //   if (doupdate == true)
+      //   {
+      //     for (unsigned j = 0; j < Nlist; j++)
+      //     {
+      //       for (unsigned i = 0; i < nl[j]->getFullAtomList().size(); i++)
+      //       {
+      //         prev_pos[j][i] = tmp_pos[j][i];
+      //       }
+      //       nl[j]->update(prev_pos[j]);
+      //       if (enableLog)
+      //       {
+      //         log << " Step " << getStep() << "  Neighbour lists updated " << nl[j]->size() << " \n";
+      //       }
+      //     }
+      //   }
+      // }
       Vector ddist;
       using AtomPair = std::pair<AtomNumber, AtomNumber>;
       using DistAtomPair = std::pair<double, AtomPair>;
@@ -1175,6 +1262,13 @@ namespace PLMD
       using MaxHeapVector = std::vector<MaxHeap>;
       MaxHeapVector maxHeapVec(N_Blocks);   
       // Build "Nlist" PINES blocks
+      cPINES.resize(N_Blocks);
+      for (int n=0; n < N_Blocks; n++)
+      {
+        cPINES[n].resize(block_lengths[n]);
+      }
+      fprintf(calc_check,"3. Created maxHeapVec\n");
+      ::fflush(calc_check);
       for (unsigned n = 0; n < N_Blocks; n++){
         // if (maxHeapVec[n].size() != 0)
         // {
@@ -1195,29 +1289,51 @@ namespace PLMD
           // Rebuild MaxHeapVec by calculatin dist from pairlist inds
           
 
-          int tot_num_pairs = block_lengths[n] + Buffer_Pairs[n];
-          for (int i = 0; i < tot_num_pairs; i++)
+          //int tot_num_pairs = block_lengths[n] + Buffer_Pairs[n];
+          fprintf(calc_check,"4. Building maxHeapVec. tot_num_pairs=%d\n", tot_num_pairs[n]);
+          ::fflush(calc_check);
+          for (int i = 0; i < tot_num_pairs[n]; i++)
           {
+            fprintf(calc_check,"4a\n");
+            ::fflush(calc_check);
             Vector Pos0, Pos1;
+            fprintf(calc_check,"4b\n");
+            ::fflush(calc_check);
             AtomNumber ind0 = pairlist[n][i].first;
+            fprintf(calc_check,"4c: ind0 = %d\n", ind0.index());
+            ::fflush(calc_check);
             AtomNumber ind1 = pairlist[n][i].second;
+            fprintf(calc_check,"4d: ind1 = %d\n", ind1.index());
+            ::fflush(calc_check);
             Pos0 = getPosition(ind0.index());
             Pos1 = getPosition(ind1.index());
+            fprintf(calc_check,"4e\n");
+            ::fflush(calc_check);
             ddist = pbcDistance(Pos0, Pos1);
+            fprintf(calc_check,"4f\n");
+            ::fflush(calc_check);
             double mag;
             mag = ddist.modulo();
+            fprintf(calc_check,"4g\n");
+            ::fflush(calc_check);
             maxHeapVec[n].push({mag, {ind0, ind1}});
+            fprintf(calc_check,"mag=%f, ind0 = %d, ind1 = %d\n", mag, ind0.index(), ind1.index());
+            ::fflush(calc_check);
             // Need to calculate cPINES now?
           }
-          for (int i = 0; i < tot_num_pairs; i++)
+          pairlist[n].clear();
+          pairlist[n].resize(tot_num_pairs[n]);
+          for (int i = 0; i < tot_num_pairs[n]; i++)
           {
-            int block_ind = tot_num_pairs - 1 - i;
+            int block_ind = tot_num_pairs[n] - 1 - i;
+            pairlist[n][block_ind] = maxHeapVec[n].top().second;
             if (i >= Buffer_Pairs[n])
             {
               cPINES[n][block_ind] = maxHeapVec[n].top().first;
-              pairlist[n][block_ind] = maxHeapVec[n].top().second;
-              maxHeapVec[n].pop();
+              fprintf(calc_check,"cPINES = %f, ind0 = %d, ind1 = %d\n", cPINES[n][block_ind], pairlist[n][block_ind].first.index(), pairlist[n][block_ind].second.index());
+              ::fflush(calc_check);
             }
+            maxHeapVec[n].pop();
           }
         }
       
@@ -1227,21 +1343,17 @@ namespace PLMD
 
       // Create/open PV value files
       FILE *PINES_rep_file = NULL;
-      if (writestride)
-      {
-        if (getStep() % writePINESstride == 0)
-        {
-          string PINES_rep_fileName = "PINES_representation_" + to_string(getStep()) + ".dat";
-          PINES_rep_file = fopen(PINES_rep_fileName.c_str(), "w+");
-        }
-      }
-      FILE *PINES_rep_file_traj = NULL;
-      if (writePINEStraj)
-      {
-        string PINES_rep_fileName_traj = "PINES_representation_traj.dat";
-        PINES_rep_file_traj = fopen(PINES_rep_fileName_traj.c_str(), "a");
-      }
+      string PINES_rep_fileName = "PINES_representation.dat";
+      PINES_rep_file = fopen(PINES_rep_fileName.c_str(), "a");
 
+      // FILE *PINES_rep_file_traj = NULL;
+      // if (writePINEStraj)
+      // {
+      //   string PINES_rep_fileName_traj = "PINES_representation_traj.dat";
+      //   PINES_rep_file_traj = fopen(PINES_rep_fileName_traj.c_str(), "a");
+      // }
+      fprintf(calc_check,"Zeroing ann_deriv\n");
+      ::fflush(calc_check);
       // Build ann_deriv
       for (unsigned j = 0; j < ann_deriv.size(); j++)
       {
@@ -1253,15 +1365,19 @@ namespace PLMD
           }
         }
       }
-      for (unsigned j = 0; j < 3; j++)
-      {
-        for (unsigned k = 0; k < 3; k++)
-        {
-          m_virial[j][k] = 0.;
-        }
-      }
+      // for (unsigned j = 0; j < 3; j++)
+      // {
+      //   for (unsigned k = 0; k < 3; k++)
+      //   {
+      //     m_virial[j][k] = 0.;
+      //   }
+      // }
+      fprintf(calc_check,"Zeroing PIV\n");
+      ::fflush(calc_check);
+      PIV.resize(N_Blocks);
       for (unsigned n = 0; n < N_Blocks; n++)
       {
+        PIV[n].resize(block_lengths[n]);
         for (unsigned i = 0; i < block_lengths[n]; i++)
         {
           PIV[n][i] = 0.;
@@ -1270,6 +1386,8 @@ namespace PLMD
       // resize vectors to the appropriate sizes and set starting values to zero --NH
       // PINES_Pair0.resize(ds_array.size());
       // PINES_Pair1.resize(ds_array.size());
+      fprintf(calc_check,"5. Preparing to calculate PIV\n");
+      ::fflush(calc_check);
       unsigned PINES_element = 0;
       for (unsigned n = 0; n < N_Blocks; n++)
       {
@@ -1277,29 +1395,42 @@ namespace PLMD
         {
           AtomNumber i0, i1;
           // // Atom0 and Atom1 are lists that index atoms for PINES elements
-          i0 = pairlist[n][i].first;
+          i0 = pairlist[n][i+Buffer_Pairs[n]].first;
           // // Record the atom IDs for the PINES elements of interest --NH
           // PINES_Pair0[PINES_element] = i0;
-          i1 = pairlist[n][i].second;
+          i1 = pairlist[n][i+Buffer_Pairs[n]].second;
+          fprintf(calc_check,"Inds are %d and %d\n", i0.index(),i1.index());
+          ::fflush(calc_check);
           // PINES_Pair1[PINES_element] = i1;
           // Pos0 and Pos1 are 1x3 vectors that hold the xyz coordinates of the indexed atoms
           Vector Pos0, Pos1;
           Pos0 = getPosition(i0.index());
           Pos1 = getPosition(i1.index());
+          fprintf(calc_check,"Calculated positions\n");
+          ::fflush(calc_check);
           // // distance is also a 1x3 vector of the xyz distances between the two atoms after consideration of the pbc
           distance = pbcDistance(Pos0, Pos1);
+          fprintf(calc_check,"Calculated PBC Dist\n");
+          ::fflush(calc_check);
           dfunc = 0.;
           // dm is a scalar value that is the magnitude of the distance between the atoms
           double dm = distance.modulo();
+          fprintf(calc_check,"dm created\n");
+          ::fflush(calc_check);
           // sfs[j] is the parameters for the switching function, which can be chosen to be different for different blocks
           // In this case, all blocks use the same switching function so all sfs[j] are the same function.
           // Used with .calculate(dm*Fvol, dfunc), the PINES element value is returned and the derivative stored in dfunc
+          fprintf(calc_check,"Calculating PIV: %f\n",cPINES[n][i]);
+          ::fflush(calc_check);
           PIV[n][i] = sfs[n].calculate(cPINES[n][i] * Fvol, dfunc);
-
+          fprintf(calc_check,"Element Calculated: %f\n",PIV[n][i]);
+          ::fflush(calc_check);
           double ds_element = 0.;
           // Create the ds_array one element at a time --NH
           ds_element = scaling[n] * Fvol * Fvol * dfunc * cPINES[n][i];
           ds_array[PINES_element] = ds_element;
+          fprintf(calc_check,"ds_element created and ds_array set\n");
+          ::fflush(calc_check);
           // Create 1x3 vector of (dr/dx,dr/dy,dr/dz) --NH
           Vector dr_dcoord = distance / dm;
 
@@ -1308,12 +1439,15 @@ namespace PLMD
           // Calculate ann_deriv values for the current PINES element in the loop --NH
           ann_deriv[i0.index()][PINES_element] = -ds_element * dr_dcoord;
           ann_deriv[i1.index()][PINES_element] = ds_element * dr_dcoord;
-
+          fprintf(calc_check,"ann_deriv val set\n");
+          ::fflush(calc_check);
           // This m_virial is likely not correct but has been included in case it is necessary to test the code --NH
-          m_virial -= ds_element * Tensor(distance, distance); // Question
+         // m_virial -= ds_element * Tensor(distance, distance); // Question
           PINES_element += 1;
         }
       }
+      fprintf(calc_check,"6. PIV calculated\n");
+      ::fflush(calc_check);
       if (!serial && comm.initialized())
       {
         int count = 0;
@@ -1352,33 +1486,47 @@ namespace PLMD
           }
         }
         // SD -- this is probably not needed.
-        comm.Sum(&m_virial[0][0], 9);
+        // comm.Sum(&m_virial[0][0], 9);
       }
       prev_stp = getStep();
 
       // PIV calculated, write values to files
-      for (unsigned n = 0; n < N_Blocks; n++)
-      {
-        int total_num_pairs = block_lengths[n] + Buffer_Pairs[n];
-        for (int pair = total_num_pairs - 1; pair < 0; pair--)
-        {
-          maxHeapVec[n].pop();
-          if (pair < block_lengths[n])
-          {
-            // use this pair/dist in PIV block n
-            // hash the positional value of the pair in the block with its PIV value
-          }
-        }
-      }
-      if (writePINEStraj)
-      {
-        fprintf(PINES_rep_file_traj, "\n#END OF FRAME\n");
-        fclose(PINES_rep_file_traj);
-      }
+      // for (unsigned n = 0; n < N_Blocks; n++)
+      // {
+      //   int total_num_pairs = block_lengths[n] + Buffer_Pairs[n];
+      //   for (int pair = total_num_pairs - 1; pair < 0; pair--)
+      //   {
+      //     maxHeapVec[n].pop();
+      //     if (pair < block_lengths[n])
+      //     {
+      //       // use this pair/dist in PIV block n
+      //       // hash the positional value of the pair in the block with its PIV value
+      //     }
+      //   }
+      // }
+      // if (writePINEStraj)
+      // {
+      //   for (int n = 0; n < N_Blocks; n++)
+      //     {
+      //       for (int i =0; i < PIV[n].size(); i++)
+      //       {
+      //         fprintf(PINES_rep_file_traj, "{%d,%d}\t", pairlist[n][i+Buffer_Pairs[n]].first,pairlist[n][i+Buffer_Pairs[n]].second);
+      //       }
+      //     }
+      //   fprintf(PINES_rep_file_traj, "\n#END OF FRAME\n");
+      //   fclose(PINES_rep_file_traj);
+      // }
       if (writestride)
       {
         if (getStep() % writePINESstride == 0)
         {
+          for (int n = 0; n < N_Blocks; n++)
+          {
+            for (int i =0; i < PIV[n].size(); i++)
+            {
+              fprintf(PINES_rep_file, "%8.6f\t", PIV[n][i]);
+            }
+          }
           fprintf(PINES_rep_file, "\n#END OF FRAME: %lld \n", getStep());
           fclose(PINES_rep_file);
         }
@@ -1394,7 +1542,7 @@ namespace PLMD
         {
           string comp = "ELEMENT-" + to_string(total_count);
           Value *valueNew = getPntrToComponent(comp);
-          valueNew->set(cPINES[j][i]);
+          valueNew->set(PIV[j][i]);
           // Pass the 3D array to the plumed core --NH
           // A 2D array is passed for each PINES element (component) --NH
           for (unsigned k = 0; k < ann_deriv.size(); k++)

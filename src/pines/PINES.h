@@ -97,6 +97,7 @@ private:
   std::vector<int> block_lengths;
   std::vector<int> G1_limits;
   std::vector<int> Buffer_Pairs;
+  std::vector<int> tot_num_pairs;
   std::vector<std::vector<std::pair<AtomNumber,AtomNumber>>> Exclude_Pairs;
   std::vector<std::vector<std::vector<AtomNumber>>> ID_list;
   std::vector<std::vector<std::vector<int>>> ResID_list;
