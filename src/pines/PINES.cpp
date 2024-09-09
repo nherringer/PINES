@@ -108,7 +108,7 @@ namespace PLMD
                                             listreduced(std::vector<AtomNumber>(1)),
                                             nl_cut(std::vector<double>(Nlist)),
                                             nl_st(std::vector<int>(Nlist)),
-                                            CompDer(false),
+                                            CompDer(true),
                                             // SD -- local variables corresponding to user defined flags.
                                             writePINEStraj(false),
                                             writestride(false),
@@ -117,7 +117,7 @@ namespace PLMD
                                             // SD -- used in prepare function.
                                             invalidateList(true),
                                             firsttime(true),
-                                            enableLog(false),
+                                            enableLog(true),
                                             block_params(std::vector<string>(1)),
                                             block_groups_atom_list(std::vector<std::vector<std::vector<AtomNumber>>>(1)),
                                             block_lengths(std::vector<int>(1)),
@@ -131,12 +131,12 @@ namespace PLMD
                                             filters(std::vector<std::vector<std::vector<bool>>>(1)),
                                             pairlist(std::vector<std::vector<std::pair<AtomNumber, AtomNumber>>>(1))
     {
-      FILE *check_test = NULL;
+      // FILE *check_test = NULL;
 
-      string check_test_fileName = "Checkpoints.dat";
-      check_test = fopen(check_test_fileName.c_str(), "w+");
-      fprintf(check_test,"0. File initialized and flushed\n");
-      ::fflush(check_test);
+      // string check_test_fileName = "Checkpoints.dat";
+      // check_test = fopen(check_test_fileName.c_str(), "w+");
+      // fprintf(check_test,"0. File initialized and flushed\n");
+      // ::fflush(check_test);
       if (keywords.exists("ENABLE_LOG"))
       {
         parseFlag("ENABLE_LOG", enableLog);
@@ -297,9 +297,9 @@ namespace PLMD
         parseVector("SFACTOR", scaling);
       }
 
-      fprintf(check_test, "1: Parsed Keywords\n");
-      fprintf(check_test, "%d\n", N_Blocks);
-      ::fflush(check_test);
+      // fprintf(check_test, "1: Parsed Keywords\n");
+      // fprintf(check_test, "%d\n", N_Blocks);
+      // ::fflush(check_test);
       // These all need to be initialized to take the relevant parameters
       // from all blocks
       block_params.resize(N_Blocks);
@@ -315,8 +315,8 @@ namespace PLMD
       pairlist.resize(N_Blocks);
       //maxHeapVec.resize(N_Blocks);
 
-      fprintf(check_test, "Vars resized to N_Blocks\n");
-      ::fflush(check_test);
+      // fprintf(check_test, "Vars resized to N_Blocks\n");
+      // ::fflush(check_test);
       for (unsigned n = 0; n < N_Blocks; n++)
       {
         G1_limits[n] = 0;
@@ -325,8 +325,8 @@ namespace PLMD
         Name_list[n].resize(2);
         block_groups_atom_list[n].resize(2);
       }
-      fprintf(check_test, "Vars resized for G1/G2\n");
-      ::fflush(check_test);
+      // fprintf(check_test, "Vars resized for G1/G2\n");
+      // ::fflush(check_test);
       // Check that the correct number of Blocks are specified
       for (unsigned n = 0; n < N_Blocks; n++)
       {
@@ -334,8 +334,8 @@ namespace PLMD
           break;
       }
 
-      fprintf(check_test, "Block params parsed:\n%s\n", block_params[0].c_str());
-      ::fflush(check_test);
+      // fprintf(check_test, "Block params parsed:\n%s\n", block_params[0].c_str());
+      // ::fflush(check_test);
 
       // Parse blocks for keywords
       for (int n = 0; n < N_Blocks; n++)
@@ -354,9 +354,9 @@ namespace PLMD
         std::vector<string> block_data = Tools::getWords(block_params[n]);
         for (int m = 0; m < block_data.size(); m++)
         {
-          fprintf(check_test, "Block data parsed:\n%s\n", block_data[m].c_str());
+          // fprintf(check_test, "Block data parsed:\n%s\n", block_data[m].c_str());
         }
-        ::fflush(check_test);
+        // ::fflush(check_test);
         // // fprintf(parse_test, "Block Data (%d):\n", n);
         // for(int x=0; x<block_data.size(); x++){
         //   // fprintf(parse_test, "%s\n", block_data[x].c_str());
@@ -366,9 +366,9 @@ namespace PLMD
         Tools::parseVector(block_data, "G1", G1_data);
         for (int m = 0; m < G1_data.size(); m++)
         {
-          fprintf(check_test, "G1 data parsed:\n%s\n", G1_data[m].c_str());
+          // fprintf(check_test, "G1 data parsed:\n%s\n", G1_data[m].c_str());
         }
-        ::fflush(check_test);
+        // ::fflush(check_test);
         // // fprintf(parse_test, "Block Data [0] (G1):\n", n);
         // for(int x=0; x<G1_data.size(); x++){
         //   // fprintf(parse_test, "%s\n", G1_data[x].c_str());
@@ -378,15 +378,15 @@ namespace PLMD
         Tools::parseVector(block_data, "G2", G2_data);
         for (int m = 0; m < G2_data.size(); m++)
         {
-          fprintf(check_test, "G2 data parsed:\n%s\n", G2_data[m].c_str());
+          // fprintf(check_test, "G2 data parsed:\n%s\n", G2_data[m].c_str());
         }
-        ::fflush(check_test);
+        // ::fflush(check_test);
         // for(int x=0; x<G2_data.size(); x++){
         //   // fprintf(parse_test, "%s\n", G2_data[x].c_str());
         // }
         Tools::parseVector(G1_data, "ATOMID", g1_ids);
-        fprintf(check_test, "Got past empty ATOMID parsing!\n");
-        ::fflush(check_test);
+        // fprintf(check_test, "Got past empty ATOMID parsing!\n");
+        // ::fflush(check_test);
         // // fprintf(parse_test, "g1_ids size: %d\n", g1_ids.size());
         for (int i = 0; i < g1_ids.size(); i++)
         {
@@ -396,8 +396,8 @@ namespace PLMD
           // // fprintf(parse_test, "%d\n", g1_ids[i]);
         }
 
-        fprintf(check_test, "Got past empty for loop parsing!\n");
-        ::fflush(check_test);
+        // fprintf(check_test, "Got past empty for loop parsing!\n");
+        // ::fflush(check_test);
 
         Tools::parseVector(G2_data, "ATOMID", g2_ids);
         // // fprintf(parse_test, "g2_ids size: %d\n", g2_ids.size());
@@ -409,8 +409,8 @@ namespace PLMD
           // // fprintf(parse_test, "%d\n", g2_ids[i]);
         }
 
-        fprintf(check_test, "Got past g2_ids!\n");
-        ::fflush(check_test);
+        // fprintf(check_test, "Got past g2_ids!\n");
+        // ::fflush(check_test);
         Tools::parseVector(G1_data, "RESID", g1_resids);
         // // fprintf(parse_test, "g1_resids size: %d\n", g1_resids.size());
         for (int i = 0; i < g1_resids.size(); i++)
@@ -425,15 +425,15 @@ namespace PLMD
           ResID_list[n][1].push_back(std::stoi(g2_resids[i]));
           // // fprintf(parse_test, "%d\n", g2_resids[i]);
         }
-        fprintf(check_test, "Got past g2_resids!\n");
-        ::fflush(check_test);
+        // fprintf(check_test, "Got past g2_resids!\n");
+        // ::fflush(check_test);
         Tools::parseVector(G1_data, "NAME", g1_names);
         // // fprintf(parse_test, "g1_names size: %d\n", g1_names.size());
         for (int m = 0; m < g1_names.size(); m++)
         {
-          fprintf(check_test, "g1_names parsed:\n%s\n", g1_names[m].c_str());
+          // fprintf(check_test, "g1_names parsed:\n%s\n", g1_names[m].c_str());
         }
-        ::fflush(check_test);
+        // ::fflush(check_test);
         for (int i = 0; i < g1_names.size(); i++)
         {
           Name_list[n][0].push_back(g1_names[i]);
@@ -453,8 +453,8 @@ namespace PLMD
         // // fprintf(parse_test, "%d\n", g2_resids);
 
         Tools::parse(block_data, "SIZE", block_length);
-        fprintf(check_test, "Block length parsed:\n%s\n", block_length.c_str());
-        ::fflush(check_test);
+        // fprintf(check_test, "Block length parsed:\n%s\n", block_length.c_str());
+        // ::fflush(check_test);
         block_lengths[n] = std::stoi(block_length);
         string buffer_pairs;
         Tools::parseVector(block_data, "EXCLUDE_PAIRS", ex_pairs_n);
@@ -495,8 +495,8 @@ namespace PLMD
         tot_num_pairs[n] = block_lengths[n] + Buffer_Pairs[n];
         pairlist[n].resize(tot_num_pairs[n]);
       }
-      fprintf(check_test, "2: Parsed PIV Blocks\n");
-      ::fflush(check_test);
+      // fprintf(check_test, "2: Parsed PIV Blocks\n");
+      // ::fflush(check_test);
       // fprintf(parse_test, "N_Blocks = %d\n\n\n", N_Blocks);
       // // fprintf(parse_test, "Block Params:\n");
       // for (int n = 0; n < N_Blocks; n++)
@@ -586,8 +586,8 @@ namespace PLMD
           }
         }
       }
-      fprintf(check_test, "3: Parsed Filters\n");
-      ::fflush(check_test);
+      // fprintf(check_test, "3: Parsed Filters\n");
+      // ::fflush(check_test);
       // Not sure if the outer loop should be over n blocks or over i indices
       listall.clear();
       // Need to add code for global atom list
@@ -607,8 +607,8 @@ namespace PLMD
             bool name_check = false;
             int f = 0;
             int caseIndex = filters[n][g][2] * 4 + filters[n][g][1] * 2 + filters[n][g][0];
-            fprintf(check_test, "caseIndex: %d\n", caseIndex);
-            ::fflush(check_test);
+            // fprintf(check_test, "caseIndex: %d\n", caseIndex);
+            // ::fflush(check_test);
             switch (caseIndex)
             {
             case 0: // 000 in binary (false, false, false)
@@ -684,19 +684,19 @@ namespace PLMD
               // break;
               break;
             case 4: // 100 in binary (true, false, false)
-              fprintf(check_test, "I'm in case %d\n", caseIndex);
-              ::fflush(check_test);
+              // fprintf(check_test, "I'm in case %d\n", caseIndex);
+              // ::fflush(check_test);
               for (int f = 0; f < Name_list[n][g].size(); f++)
               {
-                fprintf(check_test, "For loop f\n");
-                ::fflush(check_test);
+                // fprintf(check_test, "For loop f\n");
+                // ::fflush(check_test);
                 if (atom_name == Name_list[n][g][f])
                 {
-                  fprintf(check_test, "Atom Name: %s\n", atom_name.c_str());
-                  ::fflush(check_test);
+                  // fprintf(check_test, "Atom Name: %s\n", atom_name.c_str());
+                  // ::fflush(check_test);
                   block_groups_atom_list[n][g].push_back(ind);
-                  fprintf(check_test, "Pushed back\n");
-                  ::fflush(check_test);
+                  // fprintf(check_test, "Pushed back\n");
+                  // ::fflush(check_test);
                   atom_added = true;
                   break;
                 }
@@ -795,15 +795,15 @@ namespace PLMD
             }
           }
         }
-        fprintf(check_test, "Before adding atom\n");
-        ::fflush(check_test);
+        // fprintf(check_test, "Before adding atom\n");
+        // ::fflush(check_test);
         if (atom_added)
         {
           listall.push_back(ind);
         }
       }
-      fprintf(check_test, "4: Collected all possible relevent atom indices\n");
-      ::fflush(check_test);
+      // fprintf(check_test, "4: Collected all possible relevent atom indices\n");
+      // ::fflush(check_test);
       // Should I have a counter to determine stride updates? If a tolerance update is triggered a step before a stride
       // update would have been triggered it is inefficient to immediately update again. The stride update should be the
       // stride since the last update, whether from stride or tolerance.
@@ -875,8 +875,8 @@ namespace PLMD
           }
         }
       }
-      fprintf(check_test, "5: Generated MaxHeapVec for first frame (PDB)\n");
-      ::fflush(check_test);
+      // fprintf(check_test, "5: Generated MaxHeapVec for first frame (PDB)\n");
+      // ::fflush(check_test);
       if (enableLog)
       {
         log << "Total Nlists: " << N_Blocks << " \n";
@@ -888,35 +888,56 @@ namespace PLMD
 
       r00.resize(N_Blocks);
       sw.resize(N_Blocks);
+      sfs.resize(N_Blocks);
+      // fprintf(check_test, "sfs resized: %d\n", sfs.size());
+      // ::fflush(check_test);
+
       for (unsigned n = 0; n < N_Blocks; n++)
       {
-        if (!parseNumbered("SWITCH", n + 1, sw[n]))
-          break;
+        // fprintf(check_test, "for n loop\n");
+        // ::fflush(check_test);
+        if (!parseNumbered("SWITCH", n + 1, sw[n])) break;
+        // fprintf(check_test, "post switch parse\n");
+        // ::fflush(check_test);
       }
-      if (CompDer)
+     
+      // fprintf(check_test, "if CompDer\n");
+      // ::fflush(check_test);
+      // Set switching function parameters here only if computing derivatives
+      //   now set at the beginning of the dynamics to solve the r0 issue
+      if (enableLog)
       {
-        // Set switching function parameters here only if computing derivatives
-        //   now set at the beginning of the dynamics to solve the r0 issue
+        // fprintf(check_test, "enableLog\n");
+        // ::fflush(check_test);
+        log << "Switching Function Parameters \n";
+      }
+      std::string errors;
+      for (unsigned n = 0; n < N_Blocks; n++)
+      {
+        // fprintf(check_test, "pre sfs set\n");
+        // ::fflush(check_test);
+        sfs[n].set(sw[n], errors);
+        // fprintf(check_test, "sfs params set\n");
+        // ::fflush(check_test);
+        std::string num;
+        Tools::convert(n + 1, num);
+        if (errors.length() != 0)
+        {
+          error("problem reading SWITCH" + num + " keyword : " + errors);
+        }
+        r00[n] = sfs[n].get_r0();
+        // fprintf(check_test, "sfs r00[n] = %f\n",r00[n]);
+        // ::fflush(check_test);
         if (enableLog)
         {
-          log << "Switching Function Parameters \n";
-        }
-        sfs.resize(N_Blocks);
-        std::string errors;
-        for (unsigned n = 0; n < N_Blocks; n++)
-        {
-          sfs[n].set(sw[n], errors);
-          std::string num;
-          Tools::convert(n + 1, num);
-          if (errors.length() != 0)
-            error("problem reading SWITCH" + num + " keyword : " + errors);
-          r00[n] = sfs[n].get_r0();
-          if (enableLog)
-          {
-            log << "  Swf: " << n << "  r0=" << (sfs[n].description()).c_str() << " \n";
-          }
+          log << "  Swf: " << n << "  r0=" << (sfs[n].description()).c_str() << " \n";
         }
       }
+      
+
+
+
+      
 
       // build the rPINES distances (transformation and sorting is done afterwards)
       if (enableLog)
@@ -976,8 +997,8 @@ namespace PLMD
       }
 
       ds_array.resize(total_count);
-      fprintf(check_test, "6: Requested reduced list (generate from MaxHeapVec inds)\n");
-      ::fflush(check_test);
+      // fprintf(check_test, "6: Requested reduced list (generate from MaxHeapVec inds)\n");
+      // ::fflush(check_test);
     }
 
     // Does this need to be implemented for the heaps?
@@ -1011,16 +1032,16 @@ namespace PLMD
       // To a (dynamic) local perspective where the condition is triggered only nstride since
       // The last update
       // std::vector<std::pair<AtomNumber, AtomNumber> > pairlist(N_Blocks);
-      FILE *prep_check = NULL;
+      // FILE *prep_check = NULL;
 
-      string prep_check_fileName = "Prepare_Checkpoints.dat";
-      prep_check = fopen(prep_check_fileName.c_str(), "w+");
-      fprintf(prep_check,"0. File initialized and flushed. getStep = %d\n",getStep());
-      ::fflush(prep_check);
+      // string prep_check_fileName = "Prepare_Checkpoints.dat";
+      // prep_check = fopen(prep_check_fileName.c_str(), "w+");
+      // fprintf(prep_check,"0. File initialized and flushed. getStep = %d\n",getStep());
+      // ::fflush(prep_check);
       if (getStep() != 0)
       {
-        fprintf(prep_check,"In non-first step\n");
-        ::fflush(prep_check);
+        // fprintf(prep_check,"In non-first step\n");
+        // ::fflush(prep_check);
         int total_count = 0;
         for (int n = 0; n < N_Blocks; n++)
         {
@@ -1029,8 +1050,8 @@ namespace PLMD
 
         if (steps_since_update == 0)
         {
-          fprintf(prep_check,"No steps since update\n");
-          ::fflush(prep_check);
+          // fprintf(prep_check,"No steps since update\n");
+          // ::fflush(prep_check);
           // delete maxHeapVec; // ???
           using AtomPair = std::pair<AtomNumber, AtomNumber>;
           using DistAtomPair = std::pair<double, AtomPair>;
@@ -1040,15 +1061,15 @@ namespace PLMD
           std::vector<std::vector<std::pair<AtomNumber, AtomNumber>>> unique_pairs(N_Blocks);
           for (int n = 0; n < N_Blocks; n++)
           { //int tot_num_pairs = block_lengths[n] + Buffer_Pairs[n];
-            fprintf(prep_check,"In n loop. tot_num_pairs = %d\n", tot_num_pairs[n]);
-            ::fflush(prep_check);
+            // fprintf(prep_check,"In n loop. tot_num_pairs = %d\n", tot_num_pairs[n]);
+            // ::fflush(prep_check);
             for (int i = 0; i < block_groups_atom_list[n][0].size(); i++)
             {
               Vector Pos0, Pos1;
               AtomNumber ind0 = block_groups_atom_list[n][0][i];
               Pos0 = getPosition(ind0.index());
-              fprintf(prep_check,"In i loop\n");
-              ::fflush(prep_check);
+              // fprintf(prep_check,"In i loop\n");
+              // ::fflush(prep_check);
               for (int j = 0; j < block_groups_atom_list[n][1].size(); j++)
               {
                 AtomNumber ind1 = block_groups_atom_list[n][1][j];
@@ -1081,15 +1102,15 @@ namespace PLMD
                 if (maxHeapVec[n].size() < tot_num_pairs[n])
                 {
                   maxHeapVec[n].push({mag, {ind0, ind1}});
-                  fprintf(prep_check,"MaxHeap size < tot_num_pairs\n");
-                  ::fflush(prep_check);
+                  // fprintf(prep_check,"MaxHeap size < tot_num_pairs\n");
+                  // ::fflush(prep_check);
                 }
                 else if (mag < maxHeapVec[n].top().first)
                 {
                   maxHeapVec[n].pop();
                   maxHeapVec[n].push({mag, {ind0, ind1}});
-                  fprintf(prep_check,"MaxHeap single replacement\n");
-                  ::fflush(prep_check);
+                  // fprintf(prep_check,"MaxHeap single replacement\n");
+                  // ::fflush(prep_check);
                 }
               }
             }
@@ -1117,8 +1138,8 @@ namespace PLMD
           listreduced.clear();
           listreduced.insert(listreduced.end(), uniqueIndices.begin(), uniqueIndices.end());
           requestAtoms(listreduced);
-          fprintf(prep_check,"listreduced created and used to request atoms\n");
-          ::fflush(prep_check);
+          // fprintf(prep_check,"listreduced created and used to request atoms\n");
+          // ::fflush(prep_check);
           ann_deriv.resize(listreduced.size());
 
           // printf("TOTAL COUNT :%d\n\n\n", total_count);
@@ -1129,8 +1150,8 @@ namespace PLMD
 
           ds_array.resize(total_count);
           steps_since_update += 1;
-          fprintf(prep_check,"End of step_since_update=0 if \n");
-          ::fflush(prep_check);
+          // fprintf(prep_check,"End of step_since_update=0 if \n");
+          // ::fflush(prep_check);
         }
         else if (steps_since_update >= nstride)
         {
@@ -1149,8 +1170,8 @@ namespace PLMD
           }
           ds_array.resize(total_count);
           steps_since_update = 0;
-          fprintf(prep_check,"End of step_since_update>= nstride if \n");
-          ::fflush(prep_check);
+          // fprintf(prep_check,"End of step_since_update>= nstride if \n");
+          // ::fflush(prep_check);
         }
       }
     }
@@ -1158,12 +1179,12 @@ namespace PLMD
     void PINES::calculate()
     {
 
-      FILE *calc_check = NULL;
+      // FILE *calc_check = NULL;
 
-      string calc_check_fileName = "Calculate_Checkpoints.dat";
-      calc_check = fopen(calc_check_fileName.c_str(), "w+");
-      fprintf(calc_check,"0. File initialized and flushed\ngetStep = %d\n",getStep());
-      ::fflush(calc_check);
+      // string calc_check_fileName = "Calculate_Checkpoints.dat";
+      // calc_check = fopen(calc_check_fileName.c_str(), "w+");
+      // fprintf(calc_check,"0. File initialized and flushed\ngetStep = %d\n",getStep());
+      // ::fflush(calc_check);
       // Local variables
       // The following are probably needed as static arrays
       static int prev_stp = -1;
@@ -1177,8 +1198,8 @@ namespace PLMD
       // std:: vector<std::pair<double, std::pair<AtomNumber, AtomNumber> > > sortedHeapDict(N_Blocks);
       size_t stride = 1;
       unsigned rank = 0;
-      fprintf(calc_check,"1. Declared static arrays\n");
-      ::fflush(calc_check);
+      // fprintf(calc_check,"1. Declared static arrays\n");
+      // ::fflush(calc_check);
       // Serial vs parallelization?
       if (!serial)
       {
@@ -1191,8 +1212,8 @@ namespace PLMD
         rank = 0;
       }
 
-      fprintf(calc_check,"2. Passed serial/parallelization check. Serial = %s\n", serial ? "true" : "false");
-      ::fflush(calc_check);
+      // fprintf(calc_check,"2. Passed serial/parallelization check. Serial = %s\n", serial ? "true" : "false");
+      // ::fflush(calc_check);
 
       // Tolerance check and update
       //  Do the sorting only once per timestep to avoid building the PINES N times for N rPINES PDB structures!
@@ -1267,8 +1288,8 @@ namespace PLMD
       {
         cPINES[n].resize(block_lengths[n]);
       }
-      fprintf(calc_check,"3. Created maxHeapVec\n");
-      ::fflush(calc_check);
+      // fprintf(calc_check,"3. Created maxHeapVec\n");
+      // ::fflush(calc_check);
       for (unsigned n = 0; n < N_Blocks; n++){
         // if (maxHeapVec[n].size() != 0)
         // {
@@ -1290,35 +1311,35 @@ namespace PLMD
           
 
           //int tot_num_pairs = block_lengths[n] + Buffer_Pairs[n];
-          fprintf(calc_check,"4. Building maxHeapVec. tot_num_pairs=%d\n", tot_num_pairs[n]);
-          ::fflush(calc_check);
+          // fprintf(calc_check,"4. Building maxHeapVec. tot_num_pairs=%d\n", tot_num_pairs[n]);
+          // ::fflush(calc_check);
           for (int i = 0; i < tot_num_pairs[n]; i++)
           {
-            fprintf(calc_check,"4a\n");
-            ::fflush(calc_check);
+            // fprintf(calc_check,"4a\n");
+            // ::fflush(calc_check);
             Vector Pos0, Pos1;
-            fprintf(calc_check,"4b\n");
-            ::fflush(calc_check);
+            // fprintf(calc_check,"4b\n");
+            // ::fflush(calc_check);
             AtomNumber ind0 = pairlist[n][i].first;
-            fprintf(calc_check,"4c: ind0 = %d\n", ind0.index());
-            ::fflush(calc_check);
+            // fprintf(calc_check,"4c: ind0 = %d\n", ind0.index());
+            // ::fflush(calc_check);
             AtomNumber ind1 = pairlist[n][i].second;
-            fprintf(calc_check,"4d: ind1 = %d\n", ind1.index());
-            ::fflush(calc_check);
+            // fprintf(calc_check,"4d: ind1 = %d\n", ind1.index());
+            // ::fflush(calc_check);
             Pos0 = getPosition(ind0.index());
             Pos1 = getPosition(ind1.index());
-            fprintf(calc_check,"4e\n");
-            ::fflush(calc_check);
+            // fprintf(calc_check,"4e\n");
+            // ::fflush(calc_check);
             ddist = pbcDistance(Pos0, Pos1);
-            fprintf(calc_check,"4f\n");
-            ::fflush(calc_check);
+            // fprintf(calc_check,"4f\n");
+            // ::fflush(calc_check);
             double mag;
             mag = ddist.modulo();
-            fprintf(calc_check,"4g\n");
-            ::fflush(calc_check);
+            // fprintf(calc_check,"4g\n");
+            // ::fflush(calc_check);
             maxHeapVec[n].push({mag, {ind0, ind1}});
-            fprintf(calc_check,"mag=%f, ind0 = %d, ind1 = %d\n", mag, ind0.index(), ind1.index());
-            ::fflush(calc_check);
+            // fprintf(calc_check,"mag=%f, ind0 = %d, ind1 = %d\n", mag, ind0.index(), ind1.index());
+            // ::fflush(calc_check);
             // Need to calculate cPINES now?
           }
           pairlist[n].clear();
@@ -1330,8 +1351,8 @@ namespace PLMD
             if (i >= Buffer_Pairs[n])
             {
               cPINES[n][block_ind] = maxHeapVec[n].top().first;
-              fprintf(calc_check,"cPINES = %f, ind0 = %d, ind1 = %d\n", cPINES[n][block_ind], pairlist[n][block_ind].first.index(), pairlist[n][block_ind].second.index());
-              ::fflush(calc_check);
+              // fprintf(calc_check,"cPINES = %f, ind0 = %d, ind1 = %d\n", cPINES[n][block_ind], pairlist[n][block_ind].first.index(), pairlist[n][block_ind].second.index());
+              // ::fflush(calc_check);
             }
             maxHeapVec[n].pop();
           }
@@ -1342,9 +1363,6 @@ namespace PLMD
       double dfunc = 0.;
 
       // Create/open PV value files
-      FILE *PINES_rep_file = NULL;
-      string PINES_rep_fileName = "PINES_representation.dat";
-      PINES_rep_file = fopen(PINES_rep_fileName.c_str(), "a");
 
       // FILE *PINES_rep_file_traj = NULL;
       // if (writePINEStraj)
@@ -1352,8 +1370,8 @@ namespace PLMD
       //   string PINES_rep_fileName_traj = "PINES_representation_traj.dat";
       //   PINES_rep_file_traj = fopen(PINES_rep_fileName_traj.c_str(), "a");
       // }
-      fprintf(calc_check,"Zeroing ann_deriv\n");
-      ::fflush(calc_check);
+      // fprintf(calc_check,"Zeroing ann_deriv\n");
+      // ::fflush(calc_check);
       // Build ann_deriv
       for (unsigned j = 0; j < ann_deriv.size(); j++)
       {
@@ -1372,8 +1390,8 @@ namespace PLMD
       //     m_virial[j][k] = 0.;
       //   }
       // }
-      fprintf(calc_check,"Zeroing PIV\n");
-      ::fflush(calc_check);
+      // fprintf(calc_check,"Zeroing PIV\n");
+      // ::fflush(calc_check);
       PIV.resize(N_Blocks);
       for (unsigned n = 0; n < N_Blocks; n++)
       {
@@ -1386,8 +1404,8 @@ namespace PLMD
       // resize vectors to the appropriate sizes and set starting values to zero --NH
       // PINES_Pair0.resize(ds_array.size());
       // PINES_Pair1.resize(ds_array.size());
-      fprintf(calc_check,"5. Preparing to calculate PIV\n");
-      ::fflush(calc_check);
+      // fprintf(calc_check,"5. Preparing to calculate PIV\n");
+      // ::fflush(calc_check);
       unsigned PINES_element = 0;
       for (unsigned n = 0; n < N_Blocks; n++)
       {
@@ -1399,38 +1417,50 @@ namespace PLMD
           // // Record the atom IDs for the PINES elements of interest --NH
           // PINES_Pair0[PINES_element] = i0;
           i1 = pairlist[n][i+Buffer_Pairs[n]].second;
-          fprintf(calc_check,"Inds are %d and %d\n", i0.index(),i1.index());
-          ::fflush(calc_check);
+          // fprintf(calc_check,"Inds are %d and %d\n", i0.index(),i1.index());
+          // ::fflush(calc_check);
           // PINES_Pair1[PINES_element] = i1;
           // Pos0 and Pos1 are 1x3 vectors that hold the xyz coordinates of the indexed atoms
           Vector Pos0, Pos1;
           Pos0 = getPosition(i0.index());
           Pos1 = getPosition(i1.index());
-          fprintf(calc_check,"Calculated positions\n");
-          ::fflush(calc_check);
+          // fprintf(calc_check,"Calculated positions\n");
+          // ::fflush(calc_check);
           // // distance is also a 1x3 vector of the xyz distances between the two atoms after consideration of the pbc
           distance = pbcDistance(Pos0, Pos1);
-          fprintf(calc_check,"Calculated PBC Dist\n");
-          ::fflush(calc_check);
+          // fprintf(calc_check,"Calculated PBC Dist\n");
+          // ::fflush(calc_check);
           dfunc = 0.;
           // dm is a scalar value that is the magnitude of the distance between the atoms
           double dm = distance.modulo();
-          fprintf(calc_check,"dm created\n");
-          ::fflush(calc_check);
+          // fprintf(calc_check,"dm created\n");
+          // ::fflush(calc_check);
           // sfs[j] is the parameters for the switching function, which can be chosen to be different for different blocks
           // In this case, all blocks use the same switching function so all sfs[j] are the same function.
           // Used with .calculate(dm*Fvol, dfunc), the PINES element value is returned and the derivative stored in dfunc
-          fprintf(calc_check,"Calculating PIV: %f\n",cPINES[n][i]);
-          ::fflush(calc_check);
-          PIV[n][i] = sfs[n].calculate(cPINES[n][i] * Fvol, dfunc);
-          fprintf(calc_check,"Element Calculated: %f\n",PIV[n][i]);
-          ::fflush(calc_check);
+          // fprintf(calc_check,"Pre-sfs: %f\n",cPINES[n][i]);
+          // ::fflush(calc_check);
+          // fprintf(calc_check,"Pre-assignment to PIV: %f\n",PIV[n][i]);
+          // ::fflush(calc_check);
+          // fprintf(calc_check,"PIV size: %d\n",PIV[n].size());
+          // ::fflush(calc_check);
+          // fprintf(calc_check,"sfs size: %d\n",sfs.size());
+          // ::fflush(calc_check);
+          // fprintf(calc_check,"Fvol = %f\n",Fvol);
+          // ::fflush(calc_check);
+          // fprintf(calc_check,"dfunc = %f\n",dfunc);
+          // ::fflush(calc_check);
+          // fprintf(calc_check,"r0 = %f\n",sfs[n].get_r0());
+          // ::fflush(calc_check);
+          PIV[n][i] = sfs[n].calculate(cPINES[n][i]*Fvol, dfunc);
+          // fprintf(calc_check,"Element Calculated: %f\n",PIV[n][i]);
+          // ::fflush(calc_check);
           double ds_element = 0.;
           // Create the ds_array one element at a time --NH
           ds_element = scaling[n] * Fvol * Fvol * dfunc * cPINES[n][i];
           ds_array[PINES_element] = ds_element;
-          fprintf(calc_check,"ds_element created and ds_array set\n");
-          ::fflush(calc_check);
+          // fprintf(calc_check,"ds_element created and ds_array set\n");
+          // ::fflush(calc_check);
           // Create 1x3 vector of (dr/dx,dr/dy,dr/dz) --NH
           Vector dr_dcoord = distance / dm;
 
@@ -1439,15 +1469,15 @@ namespace PLMD
           // Calculate ann_deriv values for the current PINES element in the loop --NH
           ann_deriv[i0.index()][PINES_element] = -ds_element * dr_dcoord;
           ann_deriv[i1.index()][PINES_element] = ds_element * dr_dcoord;
-          fprintf(calc_check,"ann_deriv val set\n");
-          ::fflush(calc_check);
+          // fprintf(calc_check,"ann_deriv val set\n");
+          // ::fflush(calc_check);
           // This m_virial is likely not correct but has been included in case it is necessary to test the code --NH
          // m_virial -= ds_element * Tensor(distance, distance); // Question
           PINES_element += 1;
         }
       }
-      fprintf(calc_check,"6. PIV calculated\n");
-      ::fflush(calc_check);
+      // fprintf(calc_check,"6. PIV calculated\n");
+      // ::fflush(calc_check);
       if (!serial && comm.initialized())
       {
         int count = 0;
@@ -1518,6 +1548,9 @@ namespace PLMD
       // }
       if (writestride)
       {
+        FILE *PINES_rep_file = NULL;
+        string PINES_rep_fileName = "PINES_representation.dat";
+        PINES_rep_file = fopen(PINES_rep_fileName.c_str(), "a");
         if (getStep() % writePINESstride == 0)
         {
           for (int n = 0; n < N_Blocks; n++)
@@ -1528,8 +1561,8 @@ namespace PLMD
             }
           }
           fprintf(PINES_rep_file, "\n#END OF FRAME: %lld \n", getStep());
-          fclose(PINES_rep_file);
         }
+        fclose(PINES_rep_file);
       }
 
       // Pass values and derivates to next stage
